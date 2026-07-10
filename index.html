@@ -14,6 +14,7 @@
           <span>逐帧比对</span>
           <h1>DanceMirror</h1>
         </div>
+        <button class="settings-toggle" type="button" id="settingsToggle" aria-label="设置">⚙</button>
       </header>
 
       <section class="video-workspace" aria-labelledby="workspace-title">
@@ -137,8 +138,31 @@
           <button class="crop-confirm" type="button" id="cropConfirm">确认框选</button>
         </div>
       </div>
+
+      <div class="settings-panel hidden" id="settingsPanel">
+        <div class="settings-card">
+          <div class="settings-header">
+            <h2>AI 设置</h2>
+            <button class="settings-close" type="button" id="settingsClose">✕</button>
+          </div>
+          <label class="settings-field">
+            <span>API Endpoint</span>
+            <input id="apiEndpoint" type="url" placeholder="https://generativelanguage.googleapis.com/v1beta" />
+          </label>
+          <label class="settings-field">
+            <span>Model</span>
+            <input id="apiModel" type="text" placeholder="gemini-2.5-flash" />
+          </label>
+          <label class="settings-field">
+            <span>API Key</span>
+            <input id="apiKey" type="password" placeholder="填入你的 API Key" />
+          </label>
+          <p class="settings-hint">支持 Gemini API（免费注册：<a href="https://aistudio.google.com" target="_blank" rel="noopener">Google AI Studio</a>）。不填 Key 则使用 Mock 数据。</p>
+          <button class="primary-action" type="button" id="settingsSave">保存设置</button>
+        </div>
+      </div>
     </main>
 
-    <script src="./app.js"></script>
+    <script type="module" src="./app.js"></script>
   </body>
 </html>

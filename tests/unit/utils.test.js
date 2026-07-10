@@ -9,6 +9,14 @@ function extractFromAppJs(functionName) {
   return match[0];
 }
 
+function extractFromAiJs(functionName) {
+  const aiJs = readFileSync(resolve(__dirname, "../../ai.js"), "utf-8");
+  const pattern = new RegExp(`function ${functionName}\\([\\s\\S]*?\\n\\}`, "m");
+  const match = aiJs.match(pattern);
+  if (!match) return null;
+  return match[0];
+}
+
 describe("Unit Tests - Utility Functions", () => {
   test("escapeHtml escapes special characters", () => {
     const escapeHtml = (0, eval)(`(${extractFromAppJs("escapeHtml")})`);
@@ -27,10 +35,10 @@ describe("Unit Tests - Utility Functions", () => {
     expect(formatFileSize(1572864)).toBe("1.5 MB");
   });
 
-  test("formatTimestamp formats seconds to MM:SS", () => {
-    const formatTimestamp = (0, eval)(`(${extractFromAppJs("formatTimestamp")})`);
-    expect(formatTimestamp(0)).toBe("00:00");
-    expect(formatTimestamp(65)).toBe("01:05");
-    expect(formatTimestamp(599)).toBe("09:59");
+  test("formatTimestampApi formats seconds to MM:SS", () => {
+    const formatTimestampApi = (0, eval)(`(${extractFromAiJs("formatTimestampApi")})`);
+    expect(formatTimestampApi(0)).toBe("00:00");
+    expect(formatTimestampApi(65)).toBe("01:05");
+    expect(formatTimestampApi(599)).toBe("09:59");
   });
 });

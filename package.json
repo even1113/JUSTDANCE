@@ -5,7 +5,7 @@
   "type": "module",
   "description": "AI舞蹈视频比对助手 - 即来即用H5",
   "scripts": {
-    "lint": "eslint app.js && htmlhint index.html && stylelint styles.css",
+    "lint": "eslint app.js ai.js && htmlhint index.html && stylelint styles.css",
     "test": "vitest run",
     "check": "npm run lint && npm run test",
     "serve": "npx serve -l 5173"

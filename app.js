@@ -1,3 +1,10 @@
+import {
+  AI_CONFIG,
+  saveAiConfig,
+  analyzeWithAi,
+  buildMockReport,
+} from "./ai.js";
+
 const state = {
   practiceFile: null,
   referenceFile: null,
@@ -14,98 +21,6 @@ const state = {
 };
 
 const storageKey = "danceMirrorLatestReport";
-
-const mismatchPool = [
-  {
-    titles: ["Wave 路径在腰胯处中断", "手臂延伸不到位", "肩胸分离不够清晰"],
-    teacher: "绿色路径从肩膀传到胸、腰、胯，形成连续曲线。",
-    user: "红色路径在胸口后变短，腰胯没有继续向下传递。",
-    advice: "暂停在这一帧，慢速练 4 组肩-胸-腰-胯，每组 8 拍。",
-  },
-  {
-    titles: ["重心比老师慢半拍", "脚下重心切换滞后", "重心转移不够果断"],
-    teacher: "老师手臂打开时，重心已经压到右脚。",
-    user: "你的手先到位，脚下重心停在中间，下一帧才补过去。",
-    advice: "拆掉手臂，只练脚下重心切换 5 组，再叠加手臂动作。",
-  },
-  {
-    titles: ["Ending 定格提前松掉", "最后定格不够干净", "收尾动作提前回弹"],
-    teacher: "老师最后一拍身体和眼神都停住，路径收得很干净。",
-    user: "你的上半身路径提前回弹，定格的线条比老师短。",
-    advice: "最后 4 拍单独练 5 次，动作停住 2 秒再放松。",
-  },
-  {
-    titles: ["节奏卡点偏早", "动作比音乐快半拍", "抢拍导致路径变形"],
-    teacher: "老师每个重拍都精准卡在鼓点上，路径节奏稳定。",
-    user: "你的动作提前启动，红线在重拍前就已经到达终点。",
-    advice: "先不跟音乐，用节拍器从 0.5 倍速开始练卡点。",
-  },
-  {
-    titles: ["身体线条角度偏小", "手臂打开幅度不够", "动作路径比老师短"],
-    teacher: "老师手臂完全展开，绿色路径从肩到手尖是一条长弧线。",
-    user: "你的手臂弯曲，红色路径在手肘处就折回来了。",
-    advice: "对镜练手臂全展开 10 次，确认肘关节完全伸直。",
-  },
-  {
-    titles: ["躯干发力顺序反了", "核心带动不够", "发力从末端开始而不是躯干"],
-    teacher: "老师从核心发力，路径从腰传到肩再到手。",
-    user: "你从手臂开始发力，红色路径从手往回传，方向和老师相反。",
-    advice: "躺地练核心发力 3 组，感受从腰腹带动四肢的顺序。",
-  },
-  {
-    titles: ["头部和视线方向偏移", "眼神没有跟随动作", "头部路径和身体路径脱节"],
-    teacher: "老师头部和身体路径同步转动，视线始终朝向动作方向。",
-    user: "你的头部路径独立于身体，视线还停留在上一个方向。",
-    advice: "单独练头部跟随 8 次，先慢速确认视线和手同步。",
-  },
-  {
-    titles: ["膝盖弯曲角度不一致", "下半身路径偏低", "蹲的深度和老师不同"],
-    teacher: "老师膝盖弯曲约 90 度，绿色路径在低位保持稳定。",
-    user: "你的膝盖弯曲不够，红色路径比绿线高出一截。",
-    advice: "靠墙蹲 30 秒 × 3 组，找到和老师一样的膝盖角度。",
-  },
-];
-
-const summaryTemplates = [
-  "这次比对里，你的上半身节奏基本跟上了老师，但身体路径没有完整传递到腰胯。下一次先不用练整段，建议只抓差异最大的几秒，把路径逐段对齐。",
-  "整体来看，你的动作幅度和老师比较接近，但发力顺序和节奏有几处明显偏差。建议先修路径方向，再修卡点时机。",
-  "你的动作框架和老师差不多，但细节路径有几处偏移——特别是重心和手臂延伸。建议每次只修一个问题，不要贪多。",
-  "这次比对发现你的节奏感不错，但身体路径的完整度需要加强。几处红线比绿线短，说明动作没有做到位就收回来了。",
-  "比对结果显示你的动作方向基本正确，但路径的精准度还不够。有几帧红线偏离绿线较远，建议慢速拆解这几个片段。",
-];
-
-const drillStepPool = [
-  "3 分钟：只看肩胸分离，确认红线能贴近绿色上半身路径。",
-  "3 分钟：对镜练手臂全展开，确认肘关节完全伸直。",
-  "3 分钟：靠墙蹲，找到和老师一样的膝盖角度。",
-  "3 分钟：躺地练核心发力，感受从腰腹带动四肢的顺序。",
-  "3 分钟：单独练头部跟随，确认视线和手同步。",
-  "6 分钟：慢速 Wave，把路径从肩膀传到腰胯。",
-  "6 分钟：0.5 倍速练重心切换，先走脚下再叠加手臂。",
-  "6 分钟：0.75 倍速音乐练差异最大的片段，重点看路径贴合。",
-  "6 分钟：对镜练定格，每个停顿保持 2 秒。",
-  "6 分钟：节拍器卡点练习，从慢速开始逐步加速。",
-];
-
-const reviewAdvicePool = [
-  "先拖动时间轴到红线偏离最大的帧，不要一上来练整段。",
-  "每次只修一个路径问题，修好再换下一个。",
-  "下一次录制尽量固定机位，让膝盖和脚踝都进入画面，AI 更容易判断路径。",
-  "如果视频里有多人，记得用「框选自己」功能标出你的位置。",
-  "录视频时穿贴身衣服，宽松衣物会遮挡身体路径，影响 AI 判断。",
-  "尽量在光线均匀的环境录制，逆光或侧光会让路径识别不准确。",
-];
-
-function pickRandom(arr, count) {
-  const shuffled = [...arr].sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, count);
-}
-
-function formatTimestamp(seconds) {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-}
 
 const dom = {
   compareStage: document.querySelector("#compareStage"),
@@ -409,53 +324,52 @@ function renderDetectedPaths() {
   attachOverlayToUploadedVideo(dom.practicePreview, "student");
 }
 
-function buildReport() {
+async function runAnalysis() {
   const { reference, practice } = getVideoElements();
-  const duration = Math.max(
-    reference?.duration || 10,
-    practice?.duration || 10,
-  );
 
-  const selectedMismatches = pickRandom(mismatchPool, 3);
-  const mismatches = selectedMismatches.map((item, i) => {
-    const ratio = (i + 1) / 4;
-    const ts = Math.max(1, Math.floor(duration * ratio));
-    const titleIndex = Math.floor(Math.random() * item.titles.length);
-    return {
-      timestamp: formatTimestamp(ts),
-      title: item.titles[titleIndex],
-      teacherPath: item.teacher,
-      userPath: item.user,
-      advice: item.advice,
-    };
-  });
+  dom.analysisPanel.classList.remove("hidden");
+  dom.report.classList.add("hidden");
+  dom.analyzeButton.disabled = true;
+  dom.liveBadge.textContent = "逐帧比对中";
 
-  const mainTitle = mismatches[0].title;
-  const steps = pickRandom(drillStepPool, 3);
-  const durationMin = steps.reduce((sum, s) => sum + parseInt(s, 10), 0);
-  const reviewAdvice = pickRandom(reviewAdvicePool, 3);
-  const aiSummary = summaryTemplates[Math.floor(Math.random() * summaryTemplates.length)];
+  try {
+    let data;
 
-  const report = {
-    id: `comparison_${Date.now()}`,
-    createdAt: new Date().toISOString(),
-    source: `${state.referenceFile?.name || "老师视频"} / ${state.practiceFile?.name || "我的视频"}`,
-    title: mainTitle,
-    aiSummary,
-    mismatches,
-    drillPlan: {
-      durationMin,
-      steps,
-    },
-    reviewAdvice,
-    advice: mismatches[0].advice,
-  };
+    if (AI_CONFIG.apiKey) {
+      dom.analysisStage.textContent = "正在抽取关键帧...";
+      await new Promise((r) => setTimeout(r, 300));
 
-  if (state.cropRect) {
-    report.userCropRegion = state.cropRect;
+      data = await analyzeWithAi(reference, practice, state.cropRect);
+    } else {
+      dom.analysisStage.textContent = "正在提取老师动作路径...";
+      await new Promise((r) => setTimeout(r, 520));
+      dom.analysisStage.textContent = "正在逐帧对齐你的动作...";
+      await new Promise((r) => setTimeout(r, 520));
+      dom.analysisStage.textContent = "正在标出红绿路径差异...";
+      await new Promise((r) => setTimeout(r, 520));
+      dom.analysisStage.textContent = "正在生成 AI 总结和建议...";
+      await new Promise((r) => setTimeout(r, 520));
+
+      const duration = Math.max(reference?.duration || 10, practice?.duration || 10);
+      data = buildMockReport(duration, state.cropRect);
+      data.source = `${state.referenceFile?.name || "老师视频"} / ${state.practiceFile?.name || "我的视频"}`;
+    }
+
+    state.latestReport = data;
+    renderDetectedPaths();
+    renderReport(data);
+    saveLatestReport(data);
+    dom.analysisPanel.classList.add("hidden");
+    dom.report.classList.remove("hidden");
+    dom.liveBadge.textContent = AI_CONFIG.apiKey ? "AI 已分析" : "已标注路径";
+  } catch (err) {
+    dom.analysisPanel.classList.add("hidden");
+    dom.formMessage.textContent = `分析失败：${err.message}`;
+    dom.liveBadge.textContent = "分析失败";
   }
 
-  return report;
+  dom.analyzeButton.disabled = false;
+  dom.report.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function renderIssues(mismatches) {
@@ -497,36 +411,6 @@ function renderReport(data) {
   dom.drillTitle.textContent = `下一次练 ${data.drillPlan.durationMin} 分钟`;
   renderList(dom.drillSteps, data.drillPlan.steps);
   renderList(dom.shootingAdvice, data.reviewAdvice);
-}
-
-async function fakeAnalyze() {
-  const stages = [
-    "正在提取老师动作路径...",
-    "正在逐帧对齐你的动作...",
-    "正在标出红绿路径差异...",
-    "正在生成 AI 总结和建议...",
-  ];
-
-  dom.analysisPanel.classList.remove("hidden");
-  dom.report.classList.add("hidden");
-  dom.analyzeButton.disabled = true;
-  dom.liveBadge.textContent = "逐帧比对中";
-
-  for (const stage of stages) {
-    dom.analysisStage.textContent = stage;
-    await new Promise((resolve) => setTimeout(resolve, 520));
-  }
-
-  const data = buildReport();
-  state.latestReport = data;
-  renderDetectedPaths();
-  renderReport(data);
-  saveLatestReport(data);
-  dom.analysisPanel.classList.add("hidden");
-  dom.report.classList.remove("hidden");
-  dom.liveBadge.textContent = "已标注路径";
-  dom.analyzeButton.disabled = false;
-  dom.report.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function validateBeforeAnalyze() {
@@ -764,7 +648,7 @@ dom.nextFrame.addEventListener("click", () => stepFrame(1));
 
 dom.analyzeButton.addEventListener("click", () => {
   if (validateBeforeAnalyze()) {
-    fakeAnalyze();
+    runAnalysis();
   }
 });
 
@@ -780,3 +664,39 @@ dom.timelineRow.addEventListener("click", (event) => {
 renderEmpty("reference");
 renderEmpty("practice");
 dom.frameTime.textContent = "0.00s";
+
+const settingsPanel = document.querySelector("#settingsPanel");
+const settingsToggle = document.querySelector("#settingsToggle");
+const settingsClose = document.querySelector("#settingsClose");
+const settingsSave = document.querySelector("#settingsSave");
+const apiEndpointInput = document.querySelector("#apiEndpoint");
+const apiModelInput = document.querySelector("#apiModel");
+const apiKeyInput = document.querySelector("#apiKey");
+
+apiEndpointInput.value = AI_CONFIG.endpoint;
+apiModelInput.value = AI_CONFIG.model;
+apiKeyInput.value = AI_CONFIG.apiKey;
+
+settingsToggle.addEventListener("click", () => {
+  settingsPanel.classList.remove("hidden");
+});
+
+settingsClose.addEventListener("click", () => {
+  settingsPanel.classList.add("hidden");
+});
+
+settingsPanel.addEventListener("click", (e) => {
+  if (e.target === settingsPanel) {
+    settingsPanel.classList.add("hidden");
+  }
+});
+
+settingsSave.addEventListener("click", () => {
+  saveAiConfig({
+    endpoint: apiEndpointInput.value.trim(),
+    model: apiModelInput.value.trim(),
+    apiKey: apiKeyInput.value.trim(),
+  });
+  settingsPanel.classList.add("hidden");
+  dom.formMessage.textContent = AI_CONFIG.apiKey ? "AI 设置已保存，下次比对将使用真实 AI 分析" : "未填写 API Key，将使用 Mock 数据";
+});

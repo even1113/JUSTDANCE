@@ -25,7 +25,7 @@
           <span class="live-badge">等待比对</span>
         </div>
 
-        <div class="video-stage compare-stage">
+        <div class="video-stage compare-stage" id="compareStage">
           <article class="compare-pane">
             <div class="pane-header">
               <span>老师示范</span>
@@ -57,21 +57,17 @@
           </article>
         </div>
 
-        <div class="compare-toolbar" aria-label="逐帧比对控制">
-          <button class="round-tool" type="button" aria-label="后退一帧">‹</button>
-          <button class="play-tool" type="button" aria-label="播放/暂停">▶</button>
-          <button class="round-tool" type="button" aria-label="前进一帧">›</button>
+        <div class="compare-toolbar" id="compareToolbar" aria-label="逐帧比对控制">
+          <button class="round-tool" type="button" id="prevFrame" aria-label="后退一帧">‹</button>
+          <button class="play-tool" type="button" id="playPause" aria-label="播放/暂停">▶</button>
+          <button class="round-tool" type="button" id="nextFrame" aria-label="前进一帧">›</button>
           <label class="frame-slider">
-            <span id="frameTime">01.58s</span>
-            <input id="frameSlider" type="range" min="0" max="100" value="38" />
+            <span id="frameTime">0.00s</span>
+            <input id="frameSlider" type="range" min="0" max="1000" value="0" />
           </label>
         </div>
 
-        <div class="timeline-row" id="timelineRow" aria-label="AI 检测到的不匹配片段">
-          <button type="button" data-jump="0">00:08 Wave 路径偏短</button>
-          <button type="button" data-jump="1">00:13 重心慢半拍</button>
-          <button type="button" data-jump="2">00:21 Ending 提前松掉</button>
-        </div>
+        <div class="timeline-row hidden" id="timelineRow" aria-label="AI 检测到的不匹配片段"></div>
       </section>
 
       <section class="control-sheet" aria-labelledby="config-title">
@@ -104,7 +100,7 @@
         <div class="report-header">
           <span class="section-kicker">AI Summary</span>
           <h2 id="report-title">本次比对总结</h2>
-          <p id="coachNote">AI 会在这里总结老师和你的动作路径差异，并给出下一次练习建议。</p>
+          <p id="coachNote"></p>
         </div>
 
         <div class="report-section">
@@ -127,7 +123,20 @@
             <ul id="shootingAdvice"></ul>
           </article>
         </div>
+
+        <div class="report-actions">
+          <button class="secondary-action" type="button" id="recompareButton">重新比对</button>
+        </div>
       </section>
+
+      <div class="crop-overlay hidden" id="cropOverlay">
+        <div class="crop-hint">在视频中框选你自己</div>
+        <canvas id="cropCanvas"></canvas>
+        <div class="crop-actions">
+          <button class="crop-cancel" type="button" id="cropCancel">取消</button>
+          <button class="crop-confirm" type="button" id="cropConfirm">确认框选</button>
+        </div>
+      </div>
     </main>
 
     <script src="./app.js"></script>

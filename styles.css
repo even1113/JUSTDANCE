@@ -154,6 +154,10 @@ button {
   background: #1b1c20;
 }
 
+.compare-stage.stacked {
+  grid-template-columns: 1fr;
+}
+
 .compare-pane {
   display: grid;
   min-width: 0;
@@ -261,7 +265,6 @@ button {
   display: grid;
   grid-template-rows: 1fr auto;
   gap: 0;
-  height: 100%;
   min-height: 260px;
   background: #0f1014;
 }
@@ -307,6 +310,21 @@ button {
 .remove-button:hover {
   background: rgb(255 90 122 / 25%);
   border-color: rgb(255 90 122 / 60%);
+}
+
+.crop-badge {
+  padding: 3px 8px;
+  border: 1px solid rgb(16 189 232 / 40%);
+  border-radius: 4px;
+  background: rgb(16 189 232 / 12%);
+  color: var(--cyan);
+  font-size: 11px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.crop-badge:hover {
+  background: rgb(16 189 232 / 25%);
 }
 
 .timeline-row {
@@ -631,6 +649,63 @@ button {
   line-height: 1.5;
 }
 
+.report-actions {
+  margin-top: 18px;
+}
+
+.crop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 0;
+  background: rgb(0 0 0 / 85%);
+}
+
+.crop-hint {
+  padding: 16px;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 900;
+  text-align: center;
+}
+
+.crop-overlay canvas {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.crop-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 16px;
+}
+
+.crop-cancel {
+  min-height: 44px;
+  border: 1px solid rgb(255 255 255 / 30%);
+  border-radius: 8px;
+  background: transparent;
+  color: #fff;
+  font-weight: 900;
+}
+
+.crop-confirm {
+  min-height: 44px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--lime);
+  color: var(--ink);
+  font-weight: 900;
+}
+
+.crop-confirm:disabled {
+  opacity: 0.4;
+}
+
 .hidden {
   display: none;
 }
@@ -653,22 +728,5 @@ button {
 @media (width <= 390px) {
   .app-shell {
     padding-inline: 10px;
-  }
-}
-
-@media (width <= 700px) {
-  .compare-stage {
-    grid-template-columns: 1fr;
-  }
-
-  .compare-preview,
-  .compare-preview.empty,
-  .compare-preview .empty-video,
-  .compare-preview .video-preview {
-    min-height: 220px;
-  }
-
-  .compare-toolbar {
-    grid-template-columns: 34px 42px 34px minmax(0, 1fr);
   }
 }

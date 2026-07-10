@@ -27,12 +27,10 @@ describe("Unit Tests - Utility Functions", () => {
     expect(formatFileSize(1572864)).toBe("1.5 MB");
   });
 
-  test("cloneReport deep clones object", () => {
-    const cloneReport = (0, eval)(`(${extractFromAppJs("cloneReport")})`);
-    const original = { title: "test", mismatches: [{ a: 1 }] };
-    const cloned = cloneReport(original);
-    expect(cloned).toEqual(original);
-    expect(cloned).not.toBe(original);
-    expect(cloned.mismatches).not.toBe(original.mismatches);
+  test("formatTimestamp formats seconds to MM:SS", () => {
+    const formatTimestamp = (0, eval)(`(${extractFromAppJs("formatTimestamp")})`);
+    expect(formatTimestamp(0)).toBe("00:00");
+    expect(formatTimestamp(65)).toBe("01:05");
+    expect(formatTimestamp(599)).toBe("09:59");
   });
 });

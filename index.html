@@ -8,258 +8,125 @@
   </head>
   <body>
     <main class="app-shell">
-      <section class="login-screen" id="loginScreen" aria-labelledby="login-title">
-        <div class="ios-statusbar">
-          <span>9:41</span>
-          <span>5G · 100%</span>
+      <header class="app-header">
+        <div class="brand-mark">DM</div>
+        <div class="header-copy">
+          <span>逐帧比对</span>
+          <h1>DanceMirror</h1>
+        </div>
+      </header>
+
+      <section class="video-workspace" aria-labelledby="workspace-title">
+        <div class="workspace-title">
+          <div>
+            <span class="section-kicker">Frame Compare</span>
+            <h2 id="workspace-title">老师 vs 我的动作路径</h2>
+          </div>
+          <span class="live-badge">等待比对</span>
         </div>
 
-        <div class="login-card">
-          <div class="app-icon">DM</div>
-          <span class="section-kicker">Welcome Back</span>
-          <h1 id="login-title">登录 DanceMirror</h1>
-          <p>用手机号验证码进入你的双视频比对、AI 总结和历史记录。</p>
-
-          <label class="ios-field" for="phoneInput">
-            手机号
-            <div class="phone-input-row">
-              <span>+86</span>
-              <input id="phoneInput" type="tel" inputmode="numeric" maxlength="11" placeholder="请输入手机号" autocomplete="tel" />
+        <div class="video-stage compare-stage">
+          <article class="compare-pane">
+            <div class="pane-header">
+              <span>老师示范</span>
+              <strong id="referenceStatus">未添加</strong>
             </div>
-          </label>
-
-          <label class="ios-field" for="codeInput">
-            验证码
-            <div class="code-input-row">
-              <input id="codeInput" type="tel" inputmode="numeric" maxlength="6" placeholder="4-6 位数字" autocomplete="one-time-code" />
-              <button id="sendCodeButton" type="button">获取验证码</button>
+            <input id="referenceVideo" type="file" accept="video/*" />
+            <div class="preview empty compare-preview teacher-preview" id="referencePreview">
+              <div class="empty-video">
+                <span class="play-symbol">+</span>
+                <strong>添加老师视频</strong>
+                <small>点击选择视频文件</small>
+              </div>
             </div>
-          </label>
+          </article>
 
-          <button class="ios-login-button" id="loginButton" type="button">手机号登录</button>
-          <p class="login-message" id="loginMessage" role="status">Demo 模式：验证码输入任意 4-6 位数字即可。</p>
+          <article class="compare-pane">
+            <div class="pane-header">
+              <span>我的练习</span>
+              <strong id="practiceStatus">未添加</strong>
+            </div>
+            <input id="practiceVideo" type="file" accept="video/*" />
+            <div class="preview empty compare-preview student-preview" id="practicePreview">
+              <div class="empty-video">
+                <span class="play-symbol">+</span>
+                <strong>添加我的视频</strong>
+                <small>点击选择视频文件</small>
+              </div>
+            </div>
+          </article>
         </div>
 
-        <div class="ios-home-indicator"></div>
+        <div class="compare-toolbar" aria-label="逐帧比对控制">
+          <button class="round-tool" type="button" aria-label="后退一帧">‹</button>
+          <button class="play-tool" type="button" aria-label="播放/暂停">▶</button>
+          <button class="round-tool" type="button" aria-label="前进一帧">›</button>
+          <label class="frame-slider">
+            <span id="frameTime">01.58s</span>
+            <input id="frameSlider" type="range" min="0" max="100" value="38" />
+          </label>
+        </div>
+
+        <div class="timeline-row" id="timelineRow" aria-label="AI 检测到的不匹配片段">
+          <button type="button" data-jump="0">00:08 Wave 路径偏短</button>
+          <button type="button" data-jump="1">00:13 重心慢半拍</button>
+          <button type="button" data-jump="2">00:21 Ending 提前松掉</button>
+        </div>
       </section>
 
-      <section class="app-content" id="appContent" aria-hidden="true">
-        <header class="app-header">
-          <div class="brand-mark">DM</div>
-          <div class="header-copy">
-            <span id="headerMode">逐帧比对</span>
-            <h1>DanceMirror</h1>
+      <section class="control-sheet" aria-labelledby="config-title">
+        <div class="sheet-header">
+          <div>
+            <span class="section-kicker">AI Compare</span>
+            <h2 id="config-title">生成本次比对总结</h2>
           </div>
-          <button class="icon-button" id="historyButton" type="button">历史</button>
-        </header>
+        </div>
 
-        <section class="screen active" data-screen="review">
-          <section class="today-strip" aria-label="比对概览">
-            <div>
-              <span class="metric-label">过去一年</span>
-              <strong id="sessionCount">0 次比对</strong>
-            </div>
-            <div>
-              <span class="metric-label">当前帧</span>
-              <strong id="currentGoal">01.58s</strong>
-            </div>
-            <div>
-              <span class="metric-label">下一步</span>
-              <strong id="nextStep">添加视频</strong>
-            </div>
-          </section>
+        <p class="compare-copy">
+          AI 会按每一帧的身体路径、角度和节奏差异，自动在视频上标出绿色标准路径与红色偏差路径，并生成一段总结。
+        </p>
 
-          <section class="video-workspace compare-workspace" aria-labelledby="workspace-title">
-            <div class="workspace-title">
-              <div>
-                <span class="section-kicker">Frame Compare</span>
-                <h2 id="workspace-title">老师 vs 我的动作路径</h2>
-              </div>
-              <span class="live-badge">等待比对</span>
-            </div>
+        <button class="primary-action" id="analyzeButton">开始逐帧比对</button>
+        <p class="form-message" id="formMessage" role="status"></p>
+      </section>
 
-            <div class="video-stage compare-stage">
-              <article class="compare-pane">
-                <div class="pane-header">
-                  <span>老师示范</span>
-                  <strong id="referenceStatus">未添加</strong>
-                </div>
-                <div class="preview empty compare-preview teacher-preview" id="referencePreview">
-                  <div class="empty-video">
-                    <span class="play-symbol">T</span>
-                    <strong>添加老师视频</strong>
-                    <small>用来做标准路径对齐</small>
-                  </div>
-                </div>
-              </article>
+      <section class="analysis-panel hidden" id="analysisPanel" aria-live="polite">
+        <div class="analysis-card">
+          <div class="spinner"></div>
+          <div>
+            <h2>正在逐帧对齐两段视频</h2>
+            <p id="analysisStage">正在提取老师动作路径...</p>
+          </div>
+        </div>
+      </section>
 
-              <article class="compare-pane">
-                <div class="pane-header">
-                  <span>我的练习</span>
-                  <strong id="practiceStatus">未添加</strong>
-                </div>
-                <div class="preview empty compare-preview student-preview" id="practicePreview">
-                  <div class="empty-video">
-                    <span class="play-symbol">U</span>
-                    <strong>添加我的视频</strong>
-                    <small>AI 会标出与老师不一致的路径</small>
-                  </div>
-                </div>
-              </article>
-            </div>
+      <section class="report hidden" id="report" aria-labelledby="report-title">
+        <div class="report-header">
+          <span class="section-kicker">AI Summary</span>
+          <h2 id="report-title">本次比对总结</h2>
+          <p id="coachNote">AI 会在这里总结老师和你的动作路径差异，并给出下一次练习建议。</p>
+        </div>
 
-            <div class="upload-actions" aria-label="视频上传">
-              <label class="media-action" for="referenceVideo">
-                <input id="referenceVideo" type="file" accept="video/*" />
-                添加老师视频
-              </label>
-              <label class="media-action primary-media" for="practiceVideo">
-                <input id="practiceVideo" type="file" accept="video/*" />
-                添加我的视频
-              </label>
-            </div>
+        <div class="report-section">
+          <div class="section-heading">
+            <span class="section-kicker">Mismatch Detected</span>
+            <h2>自动检测到的不匹配</h2>
+          </div>
+          <div class="issue-list" id="issueList"></div>
+        </div>
 
-            <div class="demo-row">
-              <button class="ghost-action" id="sampleButton" type="button">使用示例视频跑一遍比对</button>
-            </div>
-
-            <div class="compare-toolbar" aria-label="逐帧比对控制">
-              <button class="round-tool" type="button" aria-label="后退一帧">‹</button>
-              <button class="play-tool" type="button" aria-label="播放/暂停">▶</button>
-              <button class="round-tool" type="button" aria-label="前进一帧">›</button>
-              <label class="frame-slider">
-                <span id="frameTime">01.58s</span>
-                <input id="frameSlider" type="range" min="0" max="100" value="38" />
-              </label>
-            </div>
-
-            <div class="timeline-row" id="timelineRow" aria-label="AI 检测到的不匹配片段">
-              <button type="button" data-jump="0">00:08 Wave 路径偏短</button>
-              <button type="button" data-jump="1">00:13 重心慢半拍</button>
-              <button type="button" data-jump="2">00:21 Ending 提前松掉</button>
-            </div>
-          </section>
-
-          <section class="control-sheet compare-summary-input" aria-labelledby="config-title">
-            <div class="sheet-header">
-              <div>
-                <span class="section-kicker">AI Compare</span>
-                <h2 id="config-title">生成本次比对总结</h2>
-              </div>
-            </div>
-
-            <p class="compare-copy">
-              AI 会按每一帧的身体路径、角度和节奏差异，自动在视频上标出绿色标准路径与红色偏差路径，并生成一段总结。
-            </p>
-
-            <button class="primary-action" id="analyzeButton">开始逐帧比对</button>
-            <p class="form-message" id="formMessage" role="status"></p>
-          </section>
-
-          <section class="analysis-panel hidden" id="analysisPanel" aria-live="polite">
-            <div class="analysis-card">
-              <div class="spinner"></div>
-              <div>
-                <h2>正在逐帧对齐两段视频</h2>
-                <p id="analysisStage">正在提取老师动作路径...</p>
-              </div>
-            </div>
-          </section>
-
-          <section class="report hidden" id="report" aria-labelledby="report-title">
-            <div class="report-header">
-              <span class="section-kicker">AI Summary</span>
-              <h2 id="report-title">本次比对总结</h2>
-              <p id="coachNote">AI 会在这里总结老师和你的动作路径差异，并给出下一次练习建议。</p>
-            </div>
-
-            <div class="report-section">
-              <div class="section-heading">
-                <span class="section-kicker">Mismatch Detected</span>
-                <h2>自动检测到的不匹配</h2>
-              </div>
-              <div class="issue-list" id="issueList"></div>
-            </div>
-
-            <div class="report-section split">
-              <article>
-                <span class="section-kicker">Path Notes</span>
-                <h3 id="drillTitle">下一次重点修正</h3>
-                <ul id="drillSteps"></ul>
-              </article>
-              <article>
-                <span class="section-kicker">How To Use</span>
-                <h3>复盘建议</h3>
-                <ul id="shootingAdvice"></ul>
-              </article>
-            </div>
-
-            <div class="report-actions">
-              <button class="secondary-action" id="trainButton" type="button">查看修正建议</button>
-              <button class="primary-action" id="saveButton" type="button">保存到历史</button>
-            </div>
-          </section>
-        </section>
-
-        <section class="screen" data-screen="train">
-          <section class="training-hero">
-            <span class="section-kicker">Correction Plan</span>
-            <h2 id="trainingTitle">下一次只练路径对齐</h2>
-            <p id="trainingSummary">根据最近一次比对，先把红色偏差路径压回老师的绿色路径附近。</p>
-            <div class="training-progress">
-              <span id="trainingProgressText">0/3 完成</span>
-              <div><i id="trainingProgressBar"></i></div>
-            </div>
-          </section>
-
-          <section class="drill-list" id="drillList" aria-label="修正建议"></section>
-        </section>
-
-        <section class="screen" data-screen="profile">
-          <section class="profile-card">
-            <div class="user-row">
-              <div class="user-avatar" id="userAvatar">DM</div>
-              <div>
-                <span class="section-kicker">My Account</span>
-                <h2 id="userPhone">未登录用户</h2>
-                <p id="userMeta">登录后保存过去一年比对历史</p>
-              </div>
-              <button class="logout-button" id="logoutButton" type="button">退出</button>
-            </div>
-          </section>
-
-          <section class="mini-panel">
-            <div class="section-heading">
-              <span class="section-kicker">Year Review</span>
-              <h2>过去一年比对概览</h2>
-            </div>
-            <div class="year-grid" id="profileBars"></div>
-          </section>
-
-          <section class="mini-panel">
-            <div class="section-heading">
-              <span class="section-kicker">AI Advice</span>
-              <h2>最近建议</h2>
-            </div>
-            <div class="insight-card" id="insightCard">
-              先完成一次逐帧比对，系统会开始记录每次 AI 总结和修正建议。
-            </div>
-          </section>
-
-          <section class="mini-panel">
-            <div class="section-heading">
-              <span class="section-kicker">Compare History</span>
-              <h2>过去一年比对记录</h2>
-            </div>
-            <div class="history-list" id="historyList"></div>
-          </section>
-        </section>
-
-        <nav class="bottom-nav" aria-label="主导航">
-          <button class="active" type="button" data-tab="review">比对</button>
-          <button type="button" data-tab="train">建议</button>
-          <button type="button" data-tab="profile">历史</button>
-        </nav>
+        <div class="report-section split">
+          <article>
+            <span class="section-kicker">Path Notes</span>
+            <h3 id="drillTitle">下一次重点修正</h3>
+            <ul id="drillSteps"></ul>
+          </article>
+          <article>
+            <span class="section-kicker">How To Use</span>
+            <h3>复盘建议</h3>
+            <ul id="shootingAdvice"></ul>
+          </article>
+        </div>
       </section>
     </main>
 

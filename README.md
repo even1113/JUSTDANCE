@@ -1,59 +1,67 @@
 # DanceMirror
 
-DanceMirror 是一个面向舞蹈爱好者的 AI 双视频比对助手。第一版目标不是做完整课程平台，而是验证一个核心问题：
+AI 舞蹈视频比对助手 — 即来即用的 H5 单页面应用。
 
-> 用户把老师视频和自己的练舞视频放在一起逐帧比对后，AI 能不能标出动作路径哪里不一致，并生成可执行建议。
-
-当前仓库包含两部分：
-
-- `docs/`：给 Codex 继续开发用的产品工程包。
-- `index.html` + `styles.css` + `app.js`：一个移动端优先的 H5 Demo，使用 Mock AI 报告。
+> 上传老师视频和自己的练舞视频，AI 标出动作路径差异，生成可执行的复盘建议。
 
 ## 快速预览
 
-直接用浏览器打开：
+```bash
+npm install
+npm run serve
+```
+
+然后访问 `http://localhost:5173`
+
+也可以直接用浏览器打开 `index.html`。
+
+## 产品特点
+
+- **即来即用**：无需登录注册，打开即用
+- **双视频比对**：并排上传老师视频和我的视频
+- **逐帧时间轴**：拖动查看每一帧动作
+- **AI 复盘报告**：绿色标准路径 + 红色偏差路径，3 个关键问题 + 练习计划
+- **移动端优先**：375px 起适配，小屏自动上下堆叠
+
+## 开发
+
+```bash
+npm run lint    # ESLint + HTMLHint + Stylelint
+npm run test    # Vitest
+npm run check   # lint + test 一键检查
+npm run serve   # 启动本地服务
+```
+
+## 项目结构
 
 ```text
-D:\Projects\justdance\index.html
+index.html          — 单页面入口
+styles.css          — 全局样式
+app.js              — 应用逻辑与 Mock 数据
+AGENTS.md           — AI 可执行规范
+docs/               — 产品工程文档
+docs/archive/       — 文档历史版本
+tests/              — 测试
+tests/contract/     — Contract Test
+tests/unit/         — Unit Test
 ```
 
-也可以在本目录启动一个静态服务：
+## 版本节奏
 
-```powershell
-python -m http.server 5173
-```
+- v0.1：静态 H5 原型，Mock AI 报告
+- v0.2：即来即用 H5，去掉登录/建议/历史（当前）
+- v0.3：H5 + 后端 Mock API
+- v0.4：真实 AI 抽帧分析 POC
+- v0.5：微信小程序测试版
 
-然后访问：
+## 文档
 
-```text
-http://localhost:5173
-```
-
-## MVP 范围
-
-第一版 Demo 已补齐 AI 舞蹈视频比对闭环：
-
-1. iOS 风格手机号验证码登录，登录态保存在本地
-2. 左右并排添加老师视频和我的练习视频
-3. 也可以直接使用示例视频跑完整流程
-4. 拖动逐帧时间轴查看动作
-5. 开始 AI 比对后，视频上自动出现绿色标准路径和红色偏差路径
-6. 每次比对生成一段 AI 总结
-7. 输出 3 个不匹配片段、时间点和修正建议
-8. 比对结果自动保存到当前手机号的过去一年历史
-9. 在建议页勾选修正练习
-10. 在历史页查看账号、过去一年比对记录和对应 AI 建议
-
-登录说明：
-
-- 手机号需要输入中国大陆 11 位手机号格式。
-- Demo 模式不会发送真实短信，验证码输入任意 4-6 位数字即可登录。
-
-暂不做社区、课程商城、会员支付、真实视频姿态识别、多运动扩展。
-
-## 推荐下一步
-
-1. 先用这个 H5 原型确认页面流和报告内容是否打动你。
-2. 再让 Codex 按 `docs/TASKS.md` 拆任务继续开发。
-3. 真正接 AI 前，优先完善 `docs/AI_SPEC.md` 的输出 schema 和评价维度。
-4. 如果要进入真实用户测试，下一步建议转成 Taro/uni-app 小程序，而不是直接做原生 App。
+| 文档 | 说明 |
+|------|------|
+| `docs/PRD.md` | 产品需求文档 |
+| `docs/DESIGN_SYSTEM.md` | 设计系统 |
+| `docs/TECH_SPEC.md` | 技术规范 |
+| `docs/AI_SPEC.md` | AI 输出规范 |
+| `docs/TASKS.md` | 任务拆解 |
+| `docs/HARNESS.md` | AI 开发边界 |
+| `AGENTS.md` | AI 可执行规范 |

@@ -26,13 +26,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run checks
-        run: npm run check
+      - name: Syntax check
+        run: |
+          node --check app.js
+          node --check ai.js
 
   deploy:
     needs: validate

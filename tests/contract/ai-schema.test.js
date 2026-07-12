@@ -87,4 +87,10 @@ describe("AI Schema Contract Test", () => {
     const aiJs = readFileSync(resolve(__dirname, "../../ai.js"), "utf-8");
     expect(aiJs.includes("function buildReport")).toBe(true);
   });
+
+  test("local motion comparison function exists in ai.js", () => {
+    const aiJs = readFileSync(resolve(__dirname, "../../ai.js"), "utf-8");
+    expect(aiJs.includes("async function analyzeMotionComparison")).toBe(true);
+    expect(aiJs.includes("function buildMotionReport")).toBe(true);
+  });
 });

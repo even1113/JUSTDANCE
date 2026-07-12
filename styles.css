@@ -406,6 +406,11 @@ button {
   pointer-events: none;
 }
 
+.video-preview .path-overlay {
+  inset: 0 0 34px;
+  height: auto;
+}
+
 .path-overlay path,
 .path-overlay line,
 .path-overlay circle,
@@ -422,6 +427,11 @@ button {
   filter: drop-shadow(0 0 5px rgb(76 255 131 / 45%));
 }
 
+.path-standard.path-ghost {
+  opacity: 0.42;
+  stroke-width: 4;
+}
+
 .path-user {
   fill: none;
   stroke: #ff4b6b;
@@ -430,6 +440,19 @@ button {
   stroke-linejoin: round;
   stroke-dasharray: 9 7;
   filter: drop-shadow(0 0 5px rgb(255 75 107 / 45%));
+}
+
+circle.path-standard,
+circle.path-user {
+  stroke-width: 2;
+}
+
+circle.path-standard {
+  fill: #4cff83;
+}
+
+circle.path-user {
+  fill: #ff4b6b;
 }
 
 .path-angle {
@@ -451,6 +474,10 @@ button {
   font-size: 12px;
   font-weight: 900;
   line-height: 1.35;
+}
+
+.video-preview .path-label {
+  bottom: 46px;
 }
 
 .teacher-preview .path-label::before {

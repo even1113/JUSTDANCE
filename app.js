@@ -1,8 +1,8 @@
 import {
   AI_CONFIG,
   saveAiConfig,
+  analyzeMotionComparison,
   analyzeWithAi,
-  buildMockReport,
 } from "./ai.js";
 
 const state = {
@@ -169,23 +169,60 @@ function onVideoEnded() {
   dom.playPause.textContent = "▶";
 }
 
-function overlaySvg(kind) {
+function pointsToPolyline(points = []) {
+  return points
+    .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
+    .map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`)
+    .join(" ");
+}
+
+function markerCircles(points = [], indices = [], className = "path-marker") {
+  return indices
+    .map((index) => points[index])
+    .filter(Boolean)
+    .map((point) => `<circle class="${className}" cx="${point.x.toFixed(2)}" cy="${point.y.toFixed(2)}" r="2.4" />`)
+    .join("");
+}
+
+function overlaySvg(kind, overlay) {
+  const teacherPoints = overlay?.teacherPoints || fallbackTeacherPoints;
+  const userPoints = overlay?.userPoints || fallbackUserPoints;
+  const peakIndices = overlay?.peakIndices || [Math.floor(userPoints.length / 2)];
   const isTeacher = kind === "teacher";
-  const standardPath = isTeacher
-    ? `<path class="path-standard" d="M 32 52 C 45 45, 57 49, 65 63 L 69 78 L 82 82" />
-       <path class="path-angle" d="M 67 78 L 81 82 L 88 70" />`
-    : `<path class="path-standard" d="M 31 51 C 45 44, 58 49, 66 62 L 69 78 L 82 82" />
-       <path class="path-user" d="M 31 51 C 43 48, 54 54, 59 66 L 60 79 L 73 87" />
-       <path class="path-angle" d="M 60 79 L 73 87 L 78 75" />`;
+  const teacherPolyline = pointsToPolyline(teacherPoints);
+  const userPolyline = pointsToPolyline(userPoints);
+
+  const paths = isTeacher
+    ? `<polyline class="path-standard" points="${teacherPolyline}" />${markerCircles(teacherPoints, peakIndices, "path-standard")}`
+    : `<polyline class="path-standard path-ghost" points="${teacherPolyline}" />
+       <polyline class="path-user" points="${userPolyline}" />
+       ${markerCircles(userPoints, peakIndices, "path-user")}`;
 
   return `
     <svg class="path-overlay" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-      ${standardPath}
-      <circle class="${isTeacher ? "path-standard" : "path-user"}" cx="${isTeacher ? 82 : 73}" cy="${isTeacher ? 82 : 87}" r="3" />
+      ${paths}
     </svg>
-    <div class="path-label">${isTeacher ? "老师腰胯路径连续" : "腰胯和脚下路径偏离"}</div>
+    <div class="path-label">${isTeacher ? "检测到的老师标准路径" : "检测到的用户偏差路径"}</div>
   `;
 }
+
+const fallbackTeacherPoints = [
+  { x: 30, y: 52 },
+  { x: 42, y: 47 },
+  { x: 55, y: 50 },
+  { x: 66, y: 63 },
+  { x: 70, y: 78 },
+  { x: 82, y: 82 },
+];
+
+const fallbackUserPoints = [
+  { x: 31, y: 52 },
+  { x: 43, y: 49 },
+  { x: 54, y: 55 },
+  { x: 59, y: 66 },
+  { x: 61, y: 79 },
+  { x: 74, y: 87 },
+];
 
 function renderEmpty(kind) {
   const isPractice = kind === "practice";
@@ -309,19 +346,21 @@ function handleVideoChange(kind, event) {
   renderPreview(kind, file);
 }
 
-function attachOverlayToUploadedVideo(target, kind) {
+function attachOverlayToUploadedVideo(target, kind, overlay) {
   const videoPreview = target.querySelector(".video-preview");
 
-  if (!videoPreview || videoPreview.querySelector(".path-overlay")) {
+  if (!videoPreview) {
     return;
   }
 
-  videoPreview.insertAdjacentHTML("beforeend", overlaySvg(kind));
+  videoPreview.querySelector(".path-overlay")?.remove();
+  videoPreview.querySelector(".path-label")?.remove();
+  videoPreview.insertAdjacentHTML("beforeend", overlaySvg(kind, overlay));
 }
 
-function renderDetectedPaths() {
-  attachOverlayToUploadedVideo(dom.referencePreview, "teacher");
-  attachOverlayToUploadedVideo(dom.practicePreview, "student");
+function renderDetectedPaths(report) {
+  attachOverlayToUploadedVideo(dom.referencePreview, "teacher", report?.overlay);
+  attachOverlayToUploadedVideo(dom.practicePreview, "student", report?.overlay);
 }
 
 async function runAnalysis() {
@@ -333,30 +372,37 @@ async function runAnalysis() {
   dom.liveBadge.textContent = "逐帧比对中";
 
   try {
-    let data;
+    const localReport = await analyzeMotionComparison(
+      reference,
+      practice,
+      state.cropRect,
+      (message) => {
+        dom.analysisStage.textContent = message;
+      },
+    );
+    localReport.source = `${state.referenceFile?.name || "老师视频"} / ${state.practiceFile?.name || "我的视频"}`;
+
+    let data = localReport;
 
     if (AI_CONFIG.apiKey) {
-      dom.analysisStage.textContent = "正在抽取关键帧...";
-      await new Promise((r) => setTimeout(r, 300));
-
-      data = await analyzeWithAi(reference, practice, state.cropRect);
-    } else {
-      dom.analysisStage.textContent = "正在提取老师动作路径...";
-      await new Promise((r) => setTimeout(r, 520));
-      dom.analysisStage.textContent = "正在逐帧对齐你的动作...";
-      await new Promise((r) => setTimeout(r, 520));
-      dom.analysisStage.textContent = "正在标出红绿路径差异...";
-      await new Promise((r) => setTimeout(r, 520));
-      dom.analysisStage.textContent = "正在生成 AI 总结和建议...";
-      await new Promise((r) => setTimeout(r, 520));
-
-      const duration = Math.max(reference?.duration || 10, practice?.duration || 10);
-      data = buildMockReport(duration, state.cropRect);
-      data.source = `${state.referenceFile?.name || "老师视频"} / ${state.practiceFile?.name || "我的视频"}`;
+      dom.analysisStage.textContent = "正在把关键帧交给多模态 AI 总结...";
+      try {
+        const aiReport = await analyzeWithAi(reference, practice, state.cropRect);
+        data = {
+          ...localReport,
+          ...aiReport,
+          overlay: localReport.overlay,
+          scores: localReport.scores,
+          source: localReport.source,
+          localMotionSummary: localReport.aiSummary,
+        };
+      } catch (aiError) {
+        data.aiSummary = `${localReport.aiSummary} 另外，多模态 AI 调用失败，已先使用本地路径检测结果。失败原因：${aiError.message}`;
+      }
     }
 
     state.latestReport = data;
-    renderDetectedPaths();
+    renderDetectedPaths(data);
     renderReport(data);
     saveLatestReport(data);
     dom.analysisPanel.classList.add("hidden");
@@ -445,6 +491,7 @@ function resetForRecompare() {
   dom.formMessage.textContent = "";
   dom.frameSlider.value = 0;
   dom.frameTime.textContent = "0.00s";
+  dom.compareStage.querySelectorAll(".path-overlay, .path-label").forEach((item) => item.remove());
 
   const { reference, practice } = getVideoElements();
   if (reference) {

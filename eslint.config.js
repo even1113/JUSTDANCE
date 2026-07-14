@@ -16,7 +16,7 @@ export default [
     },
   },
   {
-    files: ["server.js"],
+    files: ["server.js", "build-site.js"],
     languageOptions: {
       globals: {
         ...globals.node,

@@ -14,6 +14,7 @@ const state = {
   isPlaying: false,
   isLandscape: false,
   cropRect: null,
+  pendingCropRect: null,
   cropStart: null,
   cropDragging: false,
   cropCanvasRect: null,
@@ -240,6 +241,46 @@ function renderEmpty(kind) {
   statusEl.textContent = "未添加";
 }
 
+function clearSubjectLockOverlay() {
+  dom.practicePreview.querySelector(".subject-lock-layer")?.remove();
+}
+
+function renderSubjectLockOverlay() {
+  clearSubjectLockOverlay();
+
+  const videoPreview = dom.practicePreview.querySelector(".video-preview");
+  const video = dom.practicePreview.querySelector("video");
+
+  if (!videoPreview || !video || !state.cropRect || !video.videoWidth || !video.videoHeight) {
+    return;
+  }
+
+  const left = (state.cropRect.x / video.videoWidth) * 100;
+  const top = (state.cropRect.y / video.videoHeight) * 100;
+  const width = (state.cropRect.width / video.videoWidth) * 100;
+  const height = (state.cropRect.height / video.videoHeight) * 100;
+
+  videoPreview.insertAdjacentHTML(
+    "beforeend",
+    `
+      <div class="subject-lock-layer" aria-hidden="true">
+        <div
+          class="subject-lock"
+          style="left:${left.toFixed(2)}%;top:${top.toFixed(2)}%;width:${width.toFixed(2)}%;height:${height.toFixed(2)}%;"
+        >
+          <span>AI 已锁定你</span>
+        </div>
+      </div>
+    `,
+  );
+}
+
+function resetSubjectSelection() {
+  state.cropRect = null;
+  state.pendingCropRect = null;
+  clearSubjectLockOverlay();
+}
+
 function clearPreview(kind) {
   const isPractice = kind === "practice";
   const key = isPractice ? "practiceFile" : "referenceFile";
@@ -252,7 +293,7 @@ function clearPreview(kind) {
 
   state[key] = null;
   state[urlKey] = null;
-  if (isPractice) state.cropRect = null;
+  if (isPractice) resetSubjectSelection();
   input.value = "";
   renderEmpty(kind);
 
@@ -275,6 +316,8 @@ function renderPreview(kind, file) {
   if (state[urlKey]) {
     URL.revokeObjectURL(state[urlKey]);
   }
+
+  if (isPractice) resetSubjectSelection();
 
   state[key] = file;
   state[urlKey] = URL.createObjectURL(file);
@@ -301,6 +344,7 @@ function renderPreview(kind, file) {
     updateLayout();
     dom.frameSlider.value = 0;
     dom.frameTime.textContent = "0.00s";
+    renderSubjectLockOverlay();
   });
 
   video.addEventListener("timeupdate", () => {
@@ -328,6 +372,9 @@ function renderPreview(kind, file) {
 
   statusEl.textContent = "已添加";
   dom.liveBadge.textContent = "等待比对";
+  if (isPractice) {
+    dom.formMessage.textContent = "已添加我的视频。多人或背景复杂时，建议先点「框选自己」。";
+  }
 }
 
 function handleVideoChange(kind, event) {
@@ -365,11 +412,13 @@ function renderDetectedPaths(report) {
 
 async function runAnalysis() {
   const { reference, practice } = getVideoElements();
+  const subjectPrefix = state.cropRect ? "已锁定本人区域。" : "未框选自己，将追踪画面中最明显的运动主体。";
 
   dom.analysisPanel.classList.remove("hidden");
   dom.report.classList.add("hidden");
   dom.analyzeButton.disabled = true;
-  dom.liveBadge.textContent = "逐帧比对中";
+  dom.liveBadge.textContent = state.cropRect ? "分析框选主体" : "自动追踪主体";
+  dom.analysisStage.textContent = `${subjectPrefix}正在准备逐帧比对...`;
 
   try {
     const localReport = await analyzeMotionComparison(
@@ -377,7 +426,7 @@ async function runAnalysis() {
       practice,
       state.cropRect,
       (message) => {
-        dom.analysisStage.textContent = message;
+        dom.analysisStage.textContent = `${subjectPrefix}${message}`;
       },
     );
     localReport.source = `${state.referenceFile?.name || "老师视频"} / ${state.practiceFile?.name || "我的视频"}`;
@@ -407,7 +456,11 @@ async function runAnalysis() {
     saveLatestReport(data);
     dom.analysisPanel.classList.add("hidden");
     dom.report.classList.remove("hidden");
-    dom.liveBadge.textContent = AI_CONFIG.apiKey ? "AI 已分析" : "已标注路径";
+    if (state.cropRect) {
+      dom.liveBadge.textContent = "已分析本人";
+    } else {
+      dom.liveBadge.textContent = AI_CONFIG.apiKey ? "AI 已分析" : "已标注路径";
+    }
   } catch (err) {
     dom.analysisPanel.classList.add("hidden");
     dom.formMessage.textContent = `分析失败：${err.message}`;
@@ -465,7 +518,9 @@ function validateBeforeAnalyze() {
     return false;
   }
 
-  dom.formMessage.textContent = "";
+  dom.formMessage.textContent = state.cropRect
+    ? "已确认本人区域，AI 会只分析你框选的人。"
+    : "未框选自己：AI 会默认追踪画面中最明显的运动主体；多人视频建议先框选。";
   return true;
 }
 
@@ -510,32 +565,88 @@ function openCropOverlay() {
   const video = dom.practicePreview.querySelector("video");
   if (!video) return;
 
+  video.pause();
+  dom.formMessage.textContent = "";
+  state.pendingCropRect = state.cropRect ? { ...state.cropRect } : null;
+  state.cropDragging = false;
+  state.cropStart = null;
+  dom.cropConfirm.disabled = !state.pendingCropRect;
+  dom.cropConfirm.textContent = state.pendingCropRect ? "确认使用此区域" : "确认框选";
+  dom.cropOverlay.classList.remove("hidden");
+  drawCropFrame(video).catch((error) => {
+    dom.cropOverlay.classList.add("hidden");
+    dom.formMessage.textContent = `无法打开框选：${error.message}`;
+  });
+}
+
+function waitForVideoFrame(video) {
+  if (video.readyState >= 2 && video.videoWidth && video.videoHeight) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      cleanup();
+      reject(new Error("视频首帧还没有加载完成，请稍后再试。"));
+    }, 2500);
+
+    const cleanup = () => {
+      window.clearTimeout(timeout);
+      video.removeEventListener("loadeddata", onReady);
+      video.removeEventListener("canplay", onReady);
+      video.removeEventListener("error", onError);
+    };
+
+    const onReady = () => {
+      cleanup();
+      resolve();
+    };
+
+    const onError = () => {
+      cleanup();
+      reject(new Error("视频读取失败，请重新选择视频。"));
+    };
+
+    video.addEventListener("loadeddata", onReady);
+    video.addEventListener("canplay", onReady);
+    video.addEventListener("error", onError);
+    video.load();
+  });
+}
+
+async function drawCropFrame(video) {
+  await waitForVideoFrame(video);
+
   const canvas = dom.cropCanvas;
   const ctx = canvas.getContext("2d");
 
-  video.pause();
-  video.currentTime = 0;
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-  video.addEventListener("seeked", function onSeeked() {
-    video.removeEventListener("seeked", onSeeked);
-
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-    state.cropRect = null;
-    state.cropDragging = false;
-    state.cropStart = null;
-    state.cropImage = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    dom.cropConfirm.disabled = true;
-    dom.cropOverlay.classList.remove("hidden");
-  });
+  state.cropImage = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  if (state.pendingCropRect) {
+    drawCropRect(
+      state.pendingCropRect.x,
+      state.pendingCropRect.y,
+      state.pendingCropRect.x + state.pendingCropRect.width,
+      state.pendingCropRect.y + state.pendingCropRect.height,
+    );
+  }
 }
 
 function closeCropOverlay() {
   dom.cropOverlay.classList.add("hidden");
   state.cropDragging = false;
   state.cropStart = null;
+}
+
+function cancelCropOverlay() {
+  state.pendingCropRect = state.cropRect ? { ...state.cropRect } : null;
+  closeCropOverlay();
+  dom.formMessage.textContent = state.cropRect
+    ? "已取消重新框选，继续使用之前锁定的本人区域。"
+    : "已取消框选。未框选时，AI 会默认追踪画面中最明显的运动主体。";
 }
 
 function drawCropRect(x1, y1, x2, y2) {
@@ -574,6 +685,10 @@ function drawCropRect(x1, y1, x2, y2) {
 
 const var_lime = "#b7f34a";
 
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
 function canvasCoords(e) {
   const rect = dom.cropCanvas.getBoundingClientRect();
   const scaleX = dom.cropCanvas.width / rect.width;
@@ -581,9 +696,29 @@ function canvasCoords(e) {
   const clientX = e.touches ? e.touches[0].clientX : e.clientX;
   const clientY = e.touches ? e.touches[0].clientY : e.clientY;
   return {
-    x: (clientX - rect.left) * scaleX,
-    y: (clientY - rect.top) * scaleY,
+    x: clamp((clientX - rect.left) * scaleX, 0, dom.cropCanvas.width),
+    y: clamp((clientY - rect.top) * scaleY, 0, dom.cropCanvas.height),
   };
+}
+
+function savePendingCropRect(endPoint) {
+  if (!state.cropStart) return;
+
+  const left = Math.min(state.cropStart.x, endPoint.x);
+  const top = Math.min(state.cropStart.y, endPoint.y);
+  const w = Math.abs(endPoint.x - state.cropStart.x);
+  const h = Math.abs(endPoint.y - state.cropStart.y);
+
+  if (w > 10 && h > 10) {
+    state.pendingCropRect = {
+      x: Math.round(left),
+      y: Math.round(top),
+      width: Math.round(w),
+      height: Math.round(h),
+    };
+    dom.cropConfirm.disabled = false;
+    dom.cropConfirm.textContent = "确认锁定本人";
+  }
 }
 
 dom.cropCanvas.addEventListener("mousedown", (e) => {
@@ -601,20 +736,7 @@ dom.cropCanvas.addEventListener("mouseup", (e) => {
   if (!state.cropDragging || !state.cropStart) return;
   state.cropDragging = false;
   const cur = canvasCoords(e);
-  const left = Math.min(state.cropStart.x, cur.x);
-  const top = Math.min(state.cropStart.y, cur.y);
-  const w = Math.abs(cur.x - state.cropStart.x);
-  const h = Math.abs(cur.y - state.cropStart.y);
-
-  if (w > 10 && h > 10) {
-    state.cropRect = {
-      x: Math.round(left),
-      y: Math.round(top),
-      width: Math.round(w),
-      height: Math.round(h),
-    };
-    dom.cropConfirm.disabled = false;
-  }
+  savePendingCropRect(cur);
 });
 
 dom.cropCanvas.addEventListener("touchstart", (e) => {
@@ -639,33 +761,29 @@ dom.cropCanvas.addEventListener("touchend", (e) => {
   const scaleX = dom.cropCanvas.width / rect.width;
   const scaleY = dom.cropCanvas.height / rect.height;
   const cur = {
-    x: (touch.clientX - rect.left) * scaleX,
-    y: (touch.clientY - rect.top) * scaleY,
+    x: clamp((touch.clientX - rect.left) * scaleX, 0, dom.cropCanvas.width),
+    y: clamp((touch.clientY - rect.top) * scaleY, 0, dom.cropCanvas.height),
   };
 
-  const left = Math.min(state.cropStart.x, cur.x);
-  const top = Math.min(state.cropStart.y, cur.y);
-  const w = Math.abs(cur.x - state.cropStart.x);
-  const h = Math.abs(cur.y - state.cropStart.y);
-
-  if (w > 10 && h > 10) {
-    state.cropRect = {
-      x: Math.round(left),
-      y: Math.round(top),
-      width: Math.round(w),
-      height: Math.round(h),
-    };
-    dom.cropConfirm.disabled = false;
-  }
+  savePendingCropRect(cur);
 });
 
-dom.cropCancel.addEventListener("click", closeCropOverlay);
+dom.cropCancel.addEventListener("click", cancelCropOverlay);
 
 dom.cropConfirm.addEventListener("click", () => {
-  if (!state.cropRect) return;
+  if (!state.pendingCropRect) return;
 
+  state.cropRect = { ...state.pendingCropRect };
+  state.pendingCropRect = null;
+  renderSubjectLockOverlay();
   const badge = dom.practicePreview.querySelector(".crop-badge");
-  if (badge) badge.textContent = "已框选";
+  if (badge) {
+    badge.textContent = "AI已锁定";
+    badge.classList.add("locked");
+  }
+  dom.practiceStatus.textContent = "已锁定本人";
+  dom.formMessage.textContent = "已确认：AI 会把框选区域当作真实用户本人，只分析这个区域内的动作。";
+  dom.liveBadge.textContent = "已锁定主体";
 
   closeCropOverlay();
 });

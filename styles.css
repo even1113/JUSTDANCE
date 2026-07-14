@@ -327,6 +327,43 @@ button {
   background: rgb(16 189 232 / 25%);
 }
 
+.crop-badge.locked {
+  border-color: rgb(183 243 74 / 60%);
+  background: rgb(183 243 74 / 16%);
+  color: var(--lime);
+}
+
+.subject-lock-layer {
+  position: absolute;
+  inset: 0 0 34px;
+  z-index: 6;
+  pointer-events: none;
+}
+
+.subject-lock {
+  position: absolute;
+  min-width: 48px;
+  min-height: 48px;
+  border: 2px solid var(--lime);
+  border-radius: 8px;
+  box-shadow: 0 0 0 999px rgb(0 0 0 / 20%), 0 0 18px rgb(183 243 74 / 45%);
+}
+
+.subject-lock span {
+  position: absolute;
+  left: 6px;
+  top: -28px;
+  max-width: 132px;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: var(--lime);
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 950;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
 .timeline-row {
   display: flex;
   gap: 8px;
@@ -731,6 +768,7 @@ circle.path-user {
 
 .crop-confirm:disabled {
   opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .settings-toggle {

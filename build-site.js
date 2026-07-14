@@ -36,9 +36,8 @@ function buildServerEntrypoint() {
 import { stat } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { extname, join, normalize, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
 
-const clientDir = fileURLToPath(new URL('../client/', import.meta.url))
+const clientDir = resolve(process.cwd(), 'dist/client')
 const port = Number(process.env.PORT || 3000)
 const host = process.env.HOST || '0.0.0.0'
 

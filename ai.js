@@ -1,3 +1,9 @@
+import { runPoseComparison } from './services/poseExtractor.js'
+import {
+  buildStructuredAnalysisForModel,
+  generateFeedbackFromAnalysis,
+} from './services/feedbackGenerator.js'
+
 const AI_CONFIG = {
   endpoint: localStorage.getItem("dm_api_endpoint") || "https://generativelanguage.googleapis.com/v1beta",
   model: localStorage.getItem("dm_api_model") || "gemini-2.5-flash",
@@ -67,109 +73,6 @@ function extractFrames(videoEl) {
   })
 }
 
-function buildPrompt(cropInfo) {
-  const cropNote = cropInfo
-    ? `用户在练习视频中框选了自己的区域：x=${cropInfo.x}, y=${cropInfo.y}, width=${cropInfo.width}, height=${cropInfo.height}。请重点关注框选区域内的人物。`
-    : ""
-
-  return `你是一位温和、专业的舞蹈复盘教练。你的任务是对比老师视频和用户练习视频的关键帧，找出动作路径差异，给出具体可执行的训练建议。
-
-## 评价维度
-- 节奏：是否卡准重拍，是否有提前或滞后
-- 身体控制：重心是否稳定，发力顺序是否连贯，身体分离是否清晰
-- 动作线条：手臂/腿部/躯干是否到位，角度是否清楚
-- 出片表现：镜头距离、光线、构图、表情眼神
-
-## 输出要求
-请严格按以下 JSON 格式输出，不要输出任何其他内容：
-
-{
-  "title": "一句话总结最主要的差异",
-  "aiSummary": "2-3句话的整体比对总结",
-  "mismatches": [
-    {
-      "timestamp": "MM:SS",
-      "title": "这个差异的简短描述",
-      "teacherPath": "老师在这个时间点的动作描述（绿色标准路径）",
-      "userPath": "用户在这个时间点的动作描述（红色偏差路径）",
-      "advice": "针对这个差异的具体练习建议"
-    }
-  ],
-  "drillPlan": {
-    "durationMin": 15,
-    "steps": ["步骤1", "步骤2", "步骤3"]
-  },
-  "reviewAdvice": ["建议1", "建议2", "建议3"],
-  "safetyNote": "以上建议仅用于舞蹈训练参考，如出现疼痛或不适请停止练习。"
-}
-
-## 约束
-- 必须给出具体时间点
-- 每个差异必须区分老师动作和用户动作
-- 建议必须具体可执行，不要泛泛而谈
-- 语气鼓励但不敷衍
-- 禁止：只输出分数、医疗诊断语言、身材攻击、性化评价
-- mismatches 至少 2 条，最多 5 条
-${cropNote}
-
-下面是关键帧图片，每组包含同一时间点的老师帧和用户帧：`
-}
-
-async function callGeminiApi(prompt, frames) {
-  const parts = [{ text: prompt }]
-
-  for (let i = 0; i < frames.teacherFrames.length; i++) {
-    const tf = frames.teacherFrames[i]
-    const uf = frames.userFrames[i]
-    if (!tf || !uf) continue
-
-    const ts = formatTimestampApi(tf.time)
-    parts.push({ text: `\n--- 时间点 ${ts} ---` })
-    parts.push({ text: "老师帧：" })
-    parts.push({
-      inline_data: {
-        mime_type: "image/jpeg",
-        data: tf.base64,
-      },
-    })
-    parts.push({ text: "用户帧：" })
-    parts.push({
-      inline_data: {
-        mime_type: "image/jpeg",
-        data: uf.base64,
-      },
-    })
-  }
-
-  const url = `${AI_CONFIG.endpoint}/models/${AI_CONFIG.model}:generateContent?key=${AI_CONFIG.apiKey}`
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ parts }],
-      generationConfig: {
-        temperature: 0.4,
-        maxOutputTokens: 2048,
-      },
-    }),
-  })
-
-  if (!response.ok) {
-    const err = await response.text()
-    throw new Error(`API 请求失败 (${response.status}): ${err}`)
-  }
-
-  const data = await response.json()
-
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text
-  if (!text) {
-    throw new Error("API 返回内容为空")
-  }
-
-  return parseAiResponse(text)
-}
-
 function formatTimestampApi(seconds) {
   const m = Math.floor(seconds / 60)
   const s = Math.floor(seconds % 60)
@@ -199,31 +102,111 @@ function parseAiResponse(text) {
   return report
 }
 
-async function analyzeWithAi(referenceVideo, practiceVideo, cropInfo) {
+async function analyzeWithAi(structuredAnalysis) {
   if (!AI_CONFIG.apiKey) {
     throw new Error("请先设置 API Key（点击右上角设置图标）")
   }
 
-  const [teacherFrames, userFrames] = await Promise.all([
-    extractFrames(referenceVideo),
-    extractFrames(practiceVideo),
-  ])
-
-  if (teacherFrames.length === 0 || userFrames.length === 0) {
-    throw new Error("视频抽帧失败，请确认视频可以正常播放")
-  }
-
-  const minLen = Math.min(teacherFrames.length, userFrames.length)
-  const frames = {
-    teacherFrames: teacherFrames.slice(0, minLen),
-    userFrames: userFrames.slice(0, minLen),
-  }
-
-  const prompt = buildPrompt(cropInfo)
-  return callGeminiApi(prompt, frames)
+  const safeAnalysis = structuredAnalysis?.structuredAnalysis || structuredAnalysis
+  const modelInput = safeAnalysis?.alignedFramePairs ? safeAnalysis : buildStructuredAnalysisForModel(safeAnalysis)
+  const prompt = buildStructuredFeedbackPrompt(modelInput)
+  return callGeminiTextApi(prompt)
 }
 
-async function analyzeMotionComparison(referenceVideo, practiceVideo, cropInfo, onProgress = () => {}) {
+function buildStructuredFeedbackPrompt(structuredAnalysis) {
+  return `你是一位温和、专业、具体的舞蹈复盘教练。你不会直接读取视频，也不要猜测画面坐标；你只根据下面的结构化姿态分析结果，生成符合 DanceMirror schema 的自然语言反馈。
+
+## 结构化分析结果
+${JSON.stringify(structuredAnalysis, null, 2)}
+
+## 输出 JSON schema
+{
+  "title": "一句话总结最主要的动作差异",
+  "aiSummary": "2-3句话整体总结，说明最需要先修哪一类问题",
+  "mismatches": [
+    {
+      "timestamp": "MM:SS",
+      "title": "差异简短描述",
+      "teacherPath": "老师在这个时间点的动作表现",
+      "userPath": "用户在这个时间点的动作表现",
+      "advice": "具体可执行训练建议"
+    }
+  ],
+  "drillPlan": {
+    "durationMin": 15,
+    "steps": ["步骤1", "步骤2", "步骤3"]
+  },
+  "reviewAdvice": ["建议1", "建议2", "建议3"],
+  "safetyNote": "以上建议仅用于舞蹈训练参考，如出现疼痛或不适请停止练习。"
+}
+
+## 约束
+- 只把结构化问题转换为自然、专业、可执行的舞蹈训练建议
+- 不要输出 x、y 坐标、画面中心、像素、检测框等与舞蹈表现无直接关系的描述
+- 每条建议要温和，不攻击身材，不做医疗诊断
+- mismatches 至少 2 条，最多 4 条
+- 只输出 JSON，不要输出其他内容`
+}
+
+async function callGeminiTextApi(prompt) {
+  const url = `${AI_CONFIG.endpoint}/models/${AI_CONFIG.model}:generateContent?key=${AI_CONFIG.apiKey}`
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.35,
+        maxOutputTokens: 2048,
+      },
+    }),
+  })
+
+  if (!response.ok) {
+    const err = await response.text()
+    throw new Error(`API 请求失败 (${response.status}): ${err}`)
+  }
+
+  const data = await response.json()
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text
+  if (!text) {
+    throw new Error("API 返回内容为空")
+  }
+
+  return parseAiResponse(text)
+}
+
+async function analyzeMotionComparison(referenceVideo, practiceVideo, cropInfo, onProgress = () => {}, poseOptions = {}) {
+  try {
+    const structuredAnalysis = await runPoseComparison({
+      teacherVideo: referenceVideo,
+      userVideo: practiceVideo,
+      teacherCanvas: poseOptions.teacherCanvas,
+      userCanvas: poseOptions.userCanvas,
+      cropInfo,
+      onProgress,
+    })
+    const report = generateFeedbackFromAnalysis(structuredAnalysis, cropInfo)
+    report.pipeline = "mediapipe_pose_dtw_metrics"
+    return report
+  } catch (error) {
+    if (poseOptions.allowFallback === false) throw error
+    onProgress(`姿态识别暂不可用，正在使用本地路径兜底：${error.message}`)
+    const fallback = await analyzeLegacyMotionComparison(referenceVideo, practiceVideo, cropInfo, onProgress)
+    fallback.pipeline = "legacy_motion_fallback"
+    fallback.aiSummary = `本次未能完成 MediaPipe 姿态识别，已先用本地运动路径兜底。${fallback.aiSummary}`
+    fallback.structuredAnalysis = {
+      ...fallback.scores,
+      mirroredUserVideo: false,
+      alignedFramePairs: [],
+      issues: [],
+    }
+    return fallback
+  }
+}
+
+async function analyzeLegacyMotionComparison(referenceVideo, practiceVideo, cropInfo, onProgress = () => {}) {
   if (!referenceVideo || !practiceVideo) {
     throw new Error("请先添加老师视频和我的视频")
   }
@@ -566,8 +549,12 @@ function buildMotionReport(comparison, cropInfo) {
     id: `motion_${Date.now()}`,
     createdAt: new Date().toISOString(),
     title: `${main.title}，整体路径${pathDescriptor}`,
-    aiSummary: `这次比对已经基于两段视频的真实帧计算动作路径。老师的绿色路径和你的红色路径平均相差 ${comparison.averageDistance.toFixed(1)} 个画面百分点，最大偏差出现在 ${formatTimestampApi(main.rawTime)} 附近。建议先不要练整段，优先暂停在红线偏离最大的帧，把身体路径贴近绿色标准线。`,
-    mismatches: safeMismatches.map(({ rawTime, ...item }) => item),
+    aiSummary: `这次比对已经基于两段视频的真实帧计算动作路径。整体路径${pathDescriptor}，最大差异出现在 ${formatTimestampApi(main.rawTime)} 附近。建议先不要练整段，优先暂停在红线偏离最大的帧，把身体路径贴近绿色标准线。`,
+    mismatches: safeMismatches.map((item) => {
+      const mismatch = { ...item }
+      delete mismatch.rawTime
+      return mismatch
+    }),
     drillPlan: {
       durationMin: 15,
       steps: buildMotionDrills(safeMismatches),
@@ -580,9 +567,11 @@ function buildMotionReport(comparison, cropInfo) {
         : "如果视频里有多人或背景复杂，先用「框选自己」提高路径检测稳定性。",
     ],
     scores: {
-      pathMatch: comparison.pathMatchScore,
-      timing: comparison.timingScore,
-      maxDeviation: Math.round(comparison.maxDistance),
+      overallScore: Math.round((comparison.pathMatchScore + comparison.timingScore) / 2),
+      poseSimilarity: comparison.pathMatchScore,
+      timingScore: comparison.timingScore,
+      amplitudeScore: Math.round(clamp(92 - comparison.maxDistance * 1.2, 45, 100)),
+      controlScore: Math.round(clamp(88 - comparison.averageDistance * 1.4, 45, 100)),
     },
     overlay: {
       teacherPoints: comparison.teacherTrack.map((item) => item.point),
@@ -610,8 +599,8 @@ function buildMotionMismatch(peak) {
     rawTime: peak.time,
     timestamp: formatTimestampApi(peak.time),
     title,
-    teacherPath: `绿色路径位于画面 x=${peak.teacher.x.toFixed(0)}%、y=${peak.teacher.y.toFixed(0)}%，代表老师在这一帧的动作中心。`,
-    userPath: `红色路径位于画面 x=${peak.user.x.toFixed(0)}%、y=${peak.user.y.toFixed(0)}%，相对老师${direction}，偏差约 ${peak.distance.toFixed(1)}%。`,
+    teacherPath: `老师在这一帧的身体路径更稳定，动作中心和发力方向衔接清楚。`,
+    userPath: `你的身体路径相对老师${direction}，这一拍会显得重心或延伸没有完全跟上。`,
     advice: buildMotionAdvice(part, direction),
   }
 }

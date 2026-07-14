@@ -4,12 +4,19 @@ import {
   analyzeMotionComparison,
   analyzeWithAi,
 } from "./ai.js";
+import {
+  previewClassForKind,
+  renderEmptyVideoPane,
+  renderUploadedVideoPane,
+} from "./components/DualVideoPlayer.js";
+import { clearPoseCanvas } from "./components/PoseCanvas.js";
+import { createVideoSync } from "./hooks/useVideoSync.js";
 
 const state = {
-  practiceFile: null,
-  referenceFile: null,
-  practiceUrl: null,
-  referenceUrl: null,
+  userFile: null,
+  teacherFile: null,
+  userVideoUrl: null,
+  teacherVideoUrl: null,
   latestReport: null,
   isPlaying: false,
   isLandscape: false,
@@ -36,6 +43,7 @@ const dom = {
   analysisPanel: document.querySelector("#analysisPanel"),
   analysisStage: document.querySelector("#analysisStage"),
   report: document.querySelector("#report"),
+  scoreGrid: document.querySelector("#scoreGrid"),
   issueList: document.querySelector("#issueList"),
   drillTitle: document.querySelector("#drillTitle"),
   drillSteps: document.querySelector("#drillSteps"),
@@ -53,6 +61,22 @@ const dom = {
   cropCancel: document.querySelector("#cropCancel"),
   cropConfirm: document.querySelector("#cropConfirm"),
 };
+
+const teacherVideoRef = { current: null };
+const userVideoRef = { current: null };
+const teacherCanvasRef = { current: null };
+const userCanvasRef = { current: null };
+
+const videoSync = createVideoSync({
+  teacherVideoRef,
+  userVideoRef,
+  frameSlider: dom.frameSlider,
+  frameTime: dom.frameTime,
+  playButton: dom.playPause,
+  onStateChange: (isPlaying) => {
+    state.isPlaying = isPlaying;
+  },
+});
 
 function escapeHtml(value) {
   return String(value)
@@ -79,21 +103,17 @@ function saveLatestReport(report) {
 
 function getVideoElements() {
   return {
-    reference: dom.referencePreview.querySelector("video"),
-    practice: dom.practicePreview.querySelector("video"),
+    teacher: teacherVideoRef.current,
+    user: userVideoRef.current,
+    reference: teacherVideoRef.current,
+    practice: userVideoRef.current,
   };
 }
 
-function getMaxDuration() {
-  const { reference, practice } = getVideoElements();
-  if (!reference || !practice) return 0;
-  return Math.max(reference.duration || 0, practice.duration || 0);
-}
-
 function updateLayout() {
-  const { reference, practice } = getVideoElements();
-  const refLandscape = reference && reference.videoWidth > reference.videoHeight;
-  const pracLandscape = practice && practice.videoWidth > practice.videoHeight;
+  const { teacher, user } = getVideoElements();
+  const refLandscape = teacher && teacher.videoWidth > teacher.videoHeight;
+  const pracLandscape = user && user.videoWidth > user.videoHeight;
   const anyLandscape = refLandscape || pracLandscape;
 
   state.isLandscape = anyLandscape;
@@ -101,73 +121,16 @@ function updateLayout() {
 }
 
 function syncVideosToSlider() {
-  const { reference, practice } = getVideoElements();
-  const maxDur = getMaxDuration();
-  if (maxDur <= 0) return;
-
   const ratio = Number(dom.frameSlider.value) / 1000;
-  const time = ratio * maxDur;
-
-  if (reference && !reference.paused) return;
-  if (practice && !practice.paused) return;
-
-  if (reference) reference.currentTime = time;
-  if (practice) practice.currentTime = time;
-  dom.frameTime.textContent = `${time.toFixed(2)}s`;
-}
-
-function updateSliderFromVideos() {
-  const { reference, practice } = getVideoElements();
-  const maxDur = getMaxDuration();
-  if (maxDur <= 0) return;
-
-  const video = practice || reference;
-  if (!video) return;
-
-  const ratio = video.currentTime / maxDur;
-  dom.frameSlider.value = Math.round(ratio * 1000);
-  dom.frameTime.textContent = `${video.currentTime.toFixed(2)}s`;
+  videoSync.seekToRatio(ratio);
 }
 
 function togglePlayPause() {
-  const { reference, practice } = getVideoElements();
-  if (!reference || !practice) return;
-
-  if (state.isPlaying) {
-    reference.pause();
-    practice.pause();
-    state.isPlaying = false;
-    dom.playPause.textContent = "▶";
-  } else {
-    reference.play();
-    practice.play();
-    state.isPlaying = true;
-    dom.playPause.textContent = "❚❚";
-  }
+  videoSync.togglePlayPause();
 }
 
 function stepFrame(delta) {
-  const { reference, practice } = getVideoElements();
-  const fps = 30;
-  const step = delta / fps;
-
-  if (reference) {
-    reference.pause();
-    reference.currentTime = Math.max(0, reference.currentTime + step);
-  }
-  if (practice) {
-    practice.pause();
-    practice.currentTime = Math.max(0, practice.currentTime + step);
-  }
-
-  state.isPlaying = false;
-  dom.playPause.textContent = "▶";
-  updateSliderFromVideos();
-}
-
-function onVideoEnded() {
-  state.isPlaying = false;
-  dom.playPause.textContent = "▶";
+  videoSync.stepFrame(delta);
 }
 
 function pointsToPolyline(points = []) {
@@ -226,18 +189,13 @@ const fallbackUserPoints = [
 ];
 
 function renderEmpty(kind) {
-  const isPractice = kind === "practice";
-  const preview = isPractice ? dom.practicePreview : dom.referencePreview;
-  const statusEl = isPractice ? dom.practiceStatus : dom.referenceStatus;
+  const isUser = kind === "user";
+  const preview = isUser ? dom.practicePreview : dom.referencePreview;
+  const statusEl = isUser ? dom.practiceStatus : dom.referenceStatus;
+  const paneKind = isUser ? "user" : "teacher";
 
-  preview.className = `preview empty compare-preview ${isPractice ? "student-preview" : "teacher-preview"}`;
-  preview.innerHTML = `
-    <div class="empty-video">
-      <span class="play-symbol">+</span>
-      <strong>${isPractice ? "添加我的视频" : "添加老师视频"}</strong>
-      <small>点击选择视频文件</small>
-    </div>
-  `;
+  preview.className = `preview empty compare-preview ${previewClassForKind(paneKind)}`;
+  preview.innerHTML = renderEmptyVideoPane(paneKind);
   statusEl.textContent = "未添加";
 }
 
@@ -248,10 +206,10 @@ function clearSubjectLockOverlay() {
 function renderSubjectLockOverlay() {
   clearSubjectLockOverlay();
 
-  const videoPreview = dom.practicePreview.querySelector(".video-preview");
-  const video = dom.practicePreview.querySelector("video");
+  const videoFrame = dom.practicePreview.querySelector(".video-frame");
+  const video = userVideoRef.current;
 
-  if (!videoPreview || !video || !state.cropRect || !video.videoWidth || !video.videoHeight) {
+  if (!videoFrame || !video || !state.cropRect || !video.videoWidth || !video.videoHeight) {
     return;
   }
 
@@ -260,7 +218,7 @@ function renderSubjectLockOverlay() {
   const width = (state.cropRect.width / video.videoWidth) * 100;
   const height = (state.cropRect.height / video.videoHeight) * 100;
 
-  videoPreview.insertAdjacentHTML(
+  videoFrame.insertAdjacentHTML(
     "beforeend",
     `
       <div class="subject-lock-layer" aria-hidden="true">
@@ -282,10 +240,10 @@ function resetSubjectSelection() {
 }
 
 function clearPreview(kind) {
-  const isPractice = kind === "practice";
-  const key = isPractice ? "practiceFile" : "referenceFile";
-  const urlKey = isPractice ? "practiceUrl" : "referenceUrl";
-  const input = isPractice ? dom.practiceInput : dom.referenceInput;
+  const isUser = kind === "user";
+  const key = isUser ? "userFile" : "teacherFile";
+  const urlKey = isUser ? "userVideoUrl" : "teacherVideoUrl";
+  const input = isUser ? dom.practiceInput : dom.referenceInput;
 
   if (state[urlKey]) {
     URL.revokeObjectURL(state[urlKey]);
@@ -293,13 +251,20 @@ function clearPreview(kind) {
 
   state[key] = null;
   state[urlKey] = null;
-  if (isPractice) resetSubjectSelection();
+  if (isUser) {
+    userVideoRef.current = null;
+    userCanvasRef.current = null;
+    resetSubjectSelection();
+  } else {
+    teacherVideoRef.current = null;
+    teacherCanvasRef.current = null;
+  }
   input.value = "";
   renderEmpty(kind);
 
   state.latestReport = null;
-  state.isPlaying = false;
-  dom.playPause.textContent = "▶";
+  videoSync.pauseBoth();
+  videoSync.refresh();
   dom.report.classList.add("hidden");
   dom.timelineRow.classList.add("hidden");
   dom.liveBadge.textContent = "等待比对";
@@ -307,60 +272,54 @@ function clearPreview(kind) {
 }
 
 function renderPreview(kind, file) {
-  const isPractice = kind === "practice";
-  const preview = isPractice ? dom.practicePreview : dom.referencePreview;
-  const statusEl = isPractice ? dom.practiceStatus : dom.referenceStatus;
-  const key = isPractice ? "practiceFile" : "referenceFile";
-  const urlKey = isPractice ? "practiceUrl" : "referenceUrl";
+  const isUser = kind === "user";
+  const paneKind = isUser ? "user" : "teacher";
+  const preview = isUser ? dom.practicePreview : dom.referencePreview;
+  const statusEl = isUser ? dom.practiceStatus : dom.referenceStatus;
+  const key = isUser ? "userFile" : "teacherFile";
+  const urlKey = isUser ? "userVideoUrl" : "teacherVideoUrl";
 
   if (state[urlKey]) {
     URL.revokeObjectURL(state[urlKey]);
   }
 
-  if (isPractice) resetSubjectSelection();
+  if (isUser) resetSubjectSelection();
 
   state[key] = file;
   state[urlKey] = URL.createObjectURL(file);
-  preview.className = `preview compare-preview ${isPractice ? "student-preview" : "teacher-preview"}`;
-
-  const cropBtn = isPractice
-    ? `<button class="crop-badge" type="button" id="cropBadge">框选自己</button>`
-    : "";
-
-  preview.innerHTML = `
-    <div class="video-preview">
-      <video src="${state[urlKey]}" playsinline preload="metadata"></video>
-      <div class="video-meta">
-        <span>${escapeHtml(file.name)} · ${formatFileSize(file.size)}</span>
-        ${cropBtn}
-        <button class="remove-button" type="button">删除视频</button>
-      </div>
-    </div>
-  `;
+  preview.className = `preview compare-preview ${previewClassForKind(paneKind)}`;
+  preview.innerHTML = renderUploadedVideoPane({
+    kind: paneKind,
+    file,
+    url: state[urlKey],
+    fileSizeText: formatFileSize(file.size),
+    allowCrop: isUser,
+  });
 
   const video = preview.querySelector("video");
+  const canvas = preview.querySelector(".pose-canvas");
+  if (isUser) {
+    userVideoRef.current = video;
+    userCanvasRef.current = canvas;
+  } else {
+    teacherVideoRef.current = video;
+    teacherCanvasRef.current = canvas;
+  }
 
   video.addEventListener("loadedmetadata", () => {
     updateLayout();
     dom.frameSlider.value = 0;
     dom.frameTime.textContent = "0.00s";
     renderSubjectLockOverlay();
+    videoSync.refresh();
   });
-
-  video.addEventListener("timeupdate", () => {
-    if (state.isPlaying) {
-      updateSliderFromVideos();
-    }
-  });
-
-  video.addEventListener("ended", onVideoEnded);
 
   preview.querySelector(".remove-button").addEventListener("click", (e) => {
     e.stopPropagation();
     clearPreview(kind);
   });
 
-  if (isPractice) {
+  if (isUser) {
     const cropBadge = preview.querySelector("#cropBadge");
     if (cropBadge) {
       cropBadge.addEventListener("click", (e) => {
@@ -372,7 +331,8 @@ function renderPreview(kind, file) {
 
   statusEl.textContent = "已添加";
   dom.liveBadge.textContent = "等待比对";
-  if (isPractice) {
+  videoSync.refresh();
+  if (isUser) {
     dom.formMessage.textContent = "已添加我的视频。多人或背景复杂时，建议先点「框选自己」。";
   }
 }
@@ -411,9 +371,10 @@ function renderDetectedPaths(report) {
 }
 
 async function runAnalysis() {
-  const { reference, practice } = getVideoElements();
+  const { teacher, user } = getVideoElements();
   const subjectPrefix = state.cropRect ? "已锁定本人区域。" : "未框选自己，将追踪画面中最明显的运动主体。";
 
+  videoSync.pauseBoth();
   dom.analysisPanel.classList.remove("hidden");
   dom.report.classList.add("hidden");
   dom.analyzeButton.disabled = true;
@@ -422,26 +383,32 @@ async function runAnalysis() {
 
   try {
     const localReport = await analyzeMotionComparison(
-      reference,
-      practice,
+      teacher,
+      user,
       state.cropRect,
       (message) => {
         dom.analysisStage.textContent = `${subjectPrefix}${message}`;
       },
+      {
+        teacherCanvas: teacherCanvasRef.current,
+        userCanvas: userCanvasRef.current,
+      },
     );
-    localReport.source = `${state.referenceFile?.name || "老师视频"} / ${state.practiceFile?.name || "我的视频"}`;
+    localReport.source = `${state.teacherFile?.name || "老师视频"} / ${state.userFile?.name || "我的视频"}`;
 
     let data = localReport;
 
     if (AI_CONFIG.apiKey) {
-      dom.analysisStage.textContent = "正在把关键帧交给多模态 AI 总结...";
+      dom.analysisStage.textContent = "正在把结构化姿态分析交给 AI 总结...";
       try {
-        const aiReport = await analyzeWithAi(reference, practice, state.cropRect);
+        const aiReport = await analyzeWithAi(localReport.structuredAnalysis);
         data = {
           ...localReport,
           ...aiReport,
           overlay: localReport.overlay,
           scores: localReport.scores,
+          structuredAnalysis: localReport.structuredAnalysis,
+          pipeline: localReport.pipeline,
           source: localReport.source,
           localMotionSummary: localReport.aiSummary,
         };
@@ -495,6 +462,27 @@ function renderList(target, items) {
   target.innerHTML = items.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
 }
 
+function renderScores(scores = {}) {
+  const scoreItems = [
+    ["综合", scores.overallScore],
+    ["姿态", scores.poseSimilarity],
+    ["节奏", scores.timingScore],
+    ["幅度", scores.amplitudeScore],
+    ["控制", scores.controlScore],
+  ].filter((item) => Number.isFinite(item[1]));
+
+  dom.scoreGrid.innerHTML = scoreItems
+    .map(
+      ([label, value]) => `
+        <div class="score-pill">
+          <span>${escapeHtml(label)}</span>
+          <strong>${Math.round(value)}</strong>
+        </div>
+      `,
+    )
+    .join("");
+}
+
 function renderTimeline(report) {
   dom.timelineRow.innerHTML = report.mismatches
     .map((issue, index) => `<button type="button" data-jump="${index}">${issue.timestamp} ${escapeHtml(issue.title)}</button>`)
@@ -505,6 +493,7 @@ function renderTimeline(report) {
 function renderReport(data) {
   document.querySelector("#report-title").textContent = data.title;
   document.querySelector("#coachNote").textContent = data.aiSummary;
+  renderScores(data.scores);
   renderIssues(data.mismatches);
   renderTimeline(data);
   dom.drillTitle.textContent = `下一次练 ${data.drillPlan.durationMin} 分钟`;
@@ -513,7 +502,7 @@ function renderReport(data) {
 }
 
 function validateBeforeAnalyze() {
-  if (!state.practiceFile || !state.referenceFile) {
+  if (!state.userFile || !state.teacherFile) {
     dom.formMessage.textContent = "请同时添加老师视频和我的视频才能开始比对。";
     return false;
   }
@@ -536,10 +525,25 @@ function highlightIssue(index) {
   card.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
+function jumpToIssue(index) {
+  const issue = state.latestReport?.mismatches?.[index];
+  if (issue?.timestamp) {
+    videoSync.pauseBoth();
+    videoSync.seekToTime(parseTimestamp(issue.timestamp));
+  }
+
+  highlightIssue(index);
+}
+
+function parseTimestamp(value) {
+  const parts = String(value).split(":").map((part) => Number(part));
+  if (parts.length !== 2 || parts.some((part) => !Number.isFinite(part))) return 0;
+  return parts[0] * 60 + parts[1];
+}
+
 function resetForRecompare() {
   state.latestReport = null;
-  state.isPlaying = false;
-  dom.playPause.textContent = "▶";
+  videoSync.pauseBoth();
   dom.report.classList.add("hidden");
   dom.timelineRow.classList.add("hidden");
   dom.liveBadge.textContent = "等待比对";
@@ -547,25 +551,19 @@ function resetForRecompare() {
   dom.frameSlider.value = 0;
   dom.frameTime.textContent = "0.00s";
   dom.compareStage.querySelectorAll(".path-overlay, .path-label").forEach((item) => item.remove());
+  clearPoseCanvas(teacherCanvasRef.current);
+  clearPoseCanvas(userCanvasRef.current);
 
-  const { reference, practice } = getVideoElements();
-  if (reference) {
-    reference.pause();
-    reference.currentTime = 0;
-  }
-  if (practice) {
-    practice.pause();
-    practice.currentTime = 0;
-  }
+  videoSync.seekToTime(0);
 
   dom.compareStage.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function openCropOverlay() {
-  const video = dom.practicePreview.querySelector("video");
+  const video = userVideoRef.current;
   if (!video) return;
 
-  video.pause();
+  videoSync.pauseBoth();
   dom.formMessage.textContent = "";
   state.pendingCropRect = state.cropRect ? { ...state.cropRect } : null;
   state.cropDragging = false;
@@ -800,8 +798,8 @@ dom.referencePreview.addEventListener("click", () => {
   }
 });
 
-dom.practiceInput.addEventListener("change", (event) => handleVideoChange("practice", event));
-dom.referenceInput.addEventListener("change", (event) => handleVideoChange("reference", event));
+dom.practiceInput.addEventListener("change", (event) => handleVideoChange("user", event));
+dom.referenceInput.addEventListener("change", (event) => handleVideoChange("teacher", event));
 
 dom.frameSlider.addEventListener("input", () => {
   syncVideosToSlider();
@@ -822,12 +820,12 @@ dom.recompareButton.addEventListener("click", resetForRecompare);
 dom.timelineRow.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-jump]");
   if (button) {
-    highlightIssue(Number(button.dataset.jump));
+    jumpToIssue(Number(button.dataset.jump));
   }
 });
 
-renderEmpty("reference");
-renderEmpty("practice");
+renderEmpty("teacher");
+renderEmpty("user");
 dom.frameTime.textContent = "0.00s";
 
 const settingsPanel = document.querySelector("#settingsPanel");

@@ -15,4 +15,12 @@ export default [
       "no-empty": "off",
     },
   },
+  {
+    files: ["server.js"],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+      },
+    },
+  },
 ];

@@ -5,10 +5,10 @@
   "type": "module",
   "description": "AI舞蹈视频比对助手 - 即来即用H5",
   "scripts": {
-    "lint": "eslint app.js ai.js && htmlhint index.html && stylelint styles.css",
+    "lint": "eslint app.js ai.js server.js components hooks services && htmlhint index.html && stylelint styles.css",
     "test": "vitest run",
     "check": "npm run lint && npm run test",
-    "serve": "npx serve -l 5173"
+    "serve": "node server.js"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
@@ -18,5 +18,8 @@
     "stylelint": "^16.0.0",
     "stylelint-config-standard": "^36.0.0",
     "vitest": "^2.0.0"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "^0.10.35"
   }
 }

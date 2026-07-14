@@ -269,13 +269,30 @@ button {
   background: #0f1014;
 }
 
-.video-preview video {
+.video-frame {
+  position: relative;
+  min-height: 200px;
+  overflow: hidden;
+  background: #000;
+}
+
+.video-frame video {
+  display: block;
   width: 100%;
   height: 100%;
   min-height: 200px;
   border-radius: 0;
   background: #000;
   object-fit: contain;
+}
+
+.pose-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
 }
 
 .video-meta {
@@ -335,7 +352,7 @@ button {
 
 .subject-lock-layer {
   position: absolute;
-  inset: 0 0 34px;
+  inset: 0;
   z-index: 6;
   pointer-events: none;
 }
@@ -610,6 +627,39 @@ circle.path-user {
   margin: 8px 0 0;
   color: var(--muted);
   line-height: 1.6;
+}
+
+.score-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.score-pill {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft);
+  text-align: center;
+}
+
+.score-pill span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.score-pill strong {
+  color: var(--ink);
+  font-size: 18px;
+  line-height: 1;
 }
 
 .report-section {

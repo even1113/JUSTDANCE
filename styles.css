@@ -263,7 +263,7 @@ button {
 .video-preview {
   position: relative;
   display: grid;
-  grid-template-rows: 1fr auto;
+  grid-template-rows: 1fr auto auto;
   gap: 0;
   min-height: 260px;
   background: #0f1014;
@@ -293,6 +293,35 @@ button {
   width: 100%;
   height: 100%;
   pointer-events: none;
+}
+
+.video-frame-tools {
+  display: grid;
+  grid-template-columns: 36px minmax(64px, 1fr) 36px;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-top: 1px solid rgb(255 255 255 / 10%);
+  background: #17181d;
+}
+
+.video-frame-tools button {
+  min-width: 36px;
+  min-height: 32px;
+  border: 1px solid rgb(255 255 255 / 18%);
+  border-radius: 6px;
+  background: rgb(255 255 255 / 8%);
+  color: #fff;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.video-frame-tools output {
+  color: rgb(255 255 255 / 68%);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  text-align: center;
 }
 
 .video-meta {
@@ -400,148 +429,104 @@ button {
   font-weight: 800;
 }
 
-.compare-toolbar {
-  display: grid;
-  grid-template-columns: 38px 46px 38px minmax(0, 1fr);
-  gap: 8px;
-  align-items: center;
+.audio-align-panel {
   margin-top: 10px;
-  padding: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: #17181d;
-}
-
-.round-tool,
-.play-tool {
-  display: grid;
-  place-items: center;
-  border: 1px solid rgb(255 255 255 / 16%);
-  border-radius: 8px;
-  background: rgb(255 255 255 / 8%);
-  color: #fff;
-  font-weight: 950;
-}
-
-.round-tool {
-  min-height: 36px;
-}
-
-.play-tool {
-  min-height: 40px;
   background: #fff;
-  color: #17181d;
 }
 
-.frame-slider {
-  display: grid;
-  gap: 5px;
-  color: rgb(255 255 255 / 70%);
+.audio-align-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.audio-align-head h3 {
+  margin: 2px 0 0;
+  font-size: 16px;
+}
+
+.audio-align-head output {
+  max-width: 58%;
+  color: var(--muted);
   font-size: 12px;
+  font-weight: 800;
+  line-height: 1.4;
+  text-align: right;
+}
+
+.audio-align-head output[data-state="ready"] {
+  color: #397a08;
+}
+
+.audio-align-head output[data-state="error"] {
+  color: #b31638;
+}
+
+.audio-align-controls {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: end;
+  margin-top: 10px;
+}
+
+.offset-control {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.offset-control input {
+  width: 100%;
+  accent-color: var(--cyan);
+}
+
+.offset-number {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--soft);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.offset-number input {
+  min-width: 0;
+  height: 38px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
   font-weight: 900;
 }
 
-.frame-slider input {
-  width: 100%;
-  accent-color: var(--lime);
+.compact-action {
+  min-height: 40px;
+  margin-top: 0;
+  padding: 8px 12px;
+}
+
+.audio-auto-action {
+  grid-column: 1 / -1;
 }
 
 .compare-copy {
   margin: 0;
   color: var(--muted);
   line-height: 1.6;
-}
-
-.path-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 4;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
-
-.video-preview .path-overlay {
-  inset: 0 0 34px;
-  height: auto;
-}
-
-.path-overlay path,
-.path-overlay line,
-.path-overlay circle,
-.path-overlay polyline {
-  vector-effect: non-scaling-stroke;
-}
-
-.path-standard {
-  fill: none;
-  stroke: #4cff83;
-  stroke-width: 5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  filter: drop-shadow(0 0 5px rgb(76 255 131 / 45%));
-}
-
-.path-standard.path-ghost {
-  opacity: 0.42;
-  stroke-width: 4;
-}
-
-.path-user {
-  fill: none;
-  stroke: #ff4b6b;
-  stroke-width: 5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-dasharray: 9 7;
-  filter: drop-shadow(0 0 5px rgb(255 75 107 / 45%));
-}
-
-circle.path-standard,
-circle.path-user {
-  stroke-width: 2;
-}
-
-circle.path-standard {
-  fill: #4cff83;
-}
-
-circle.path-user {
-  fill: #ff4b6b;
-}
-
-.path-angle {
-  fill: rgb(255 234 0 / 12%);
-  stroke: #ffe600;
-  stroke-width: 3;
-}
-
-.path-label {
-  position: absolute;
-  z-index: 5;
-  left: 12px;
-  bottom: 12px;
-  max-width: calc(100% - 24px);
-  padding: 7px 9px;
-  border-radius: 999px;
-  background: rgb(0 0 0 / 58%);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 900;
-  line-height: 1.35;
-}
-
-.video-preview .path-label {
-  bottom: 46px;
-}
-
-.teacher-preview .path-label::before {
-  content: "绿线 标准路径 · ";
-  color: #4cff83;
-}
-
-.student-preview .path-label::before {
-  content: "红线 偏差路径 · ";
-  color: #ff8aa0;
 }
 
 .primary-action,

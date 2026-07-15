@@ -29,8 +29,13 @@ function renderUploadedVideoPane({ kind, file, url, fileSizeText, allowCrop = fa
   return `
     <div class="video-preview" data-video-kind="${kind}">
       <div class="video-frame">
-        <video src="${escapeHtml(url)}" playsinline preload="metadata"></video>
+        <video src="${escapeHtml(url)}" controls playsinline preload="metadata"></video>
         <canvas class="pose-canvas" aria-hidden="true"></canvas>
+      </div>
+      <div class="video-frame-tools" aria-label="${kind === 'teacher' ? '老师视频' : '我的视频'}逐帧控制">
+        <button type="button" data-frame-step="-1" title="后退一帧" aria-label="后退一帧">‹</button>
+        <output data-video-time>0.00s</output>
+        <button type="button" data-frame-step="1" title="前进一帧" aria-label="前进一帧">›</button>
       </div>
       <div class="video-meta">
         <span>${escapeHtml(file.name)} · ${escapeHtml(fileSizeText)}</span>

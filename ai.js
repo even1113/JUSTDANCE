@@ -185,13 +185,15 @@ async function analyzeMotionComparison(referenceVideo, practiceVideo, cropInfo, 
       teacherCanvas: poseOptions.teacherCanvas,
       userCanvas: poseOptions.userCanvas,
       cropInfo,
+      audioAlignment: poseOptions.audioAlignment,
+      onPoseFramesReady: poseOptions.onPoseFramesReady,
       onProgress,
     })
     const report = generateFeedbackFromAnalysis(structuredAnalysis, cropInfo)
     report.pipeline = "mediapipe_pose_dtw_metrics"
     return report
   } catch (error) {
-    if (poseOptions.allowFallback === false) throw error
+    if (poseOptions.allowLegacyFallback !== true) throw error
     onProgress(`姿态识别暂不可用，正在使用本地路径兜底：${error.message}`)
     const fallback = await analyzeLegacyMotionComparison(referenceVideo, practiceVideo, cropInfo, onProgress)
     fallback.pipeline = "legacy_motion_fallback"

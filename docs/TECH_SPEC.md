@@ -1,18 +1,20 @@
-<!-- version: v0.2 | updated: 2026-07-10 -->
+<!-- version: v0.3 | updated: 2026-07-15 -->
 # DanceMirror Tech Spec
 
 ## Changelog
 
+- v0.3 (2026-07-15): 纯前端音轨对齐、MediaPipe 逐帧姿态识别和 DTW 动作对齐
 - v0.2 (2026-07-10): 即来即用 H5，移除 auth API，简化架构
 - v0.1 (2026-07-01): 初始版本
 
 ## 1. 推荐技术路线
 
-阶段 0：H5 静态原型（当前）
+阶段 0：H5 浏览器端分析 POC（当前）
 
 - 目标：快速验证产品流、报告结构、视觉方向
-- 技术：HTML/CSS/JavaScript，无依赖
+- 技术：HTML/CSS/JavaScript、Web Audio API、MediaPipe Tasks Vision
 - 即来即用，无需登录
+- 视频、音轨和姿态数据只在浏览器内处理，不依赖业务后端
 
 阶段 1：H5 + 后端 Mock API
 
@@ -32,23 +34,15 @@
 ## 2. MVP 架构
 
 ```text
-H5 Client (单页面)
-  upload video
-  request analysis
-        |
-        v
-Backend API
-  create analysis job
-  store video
-  call AI analysis pipeline
-        |
-        v
-AI pipeline
-  video metadata
-  pose estimation, later
-  multimodal model
-  dance knowledge prompt
-  structured report schema
+H5 Client（单页面、纯前端）
+  本地视频 URL
+  独立视频播放控制
+  Web Audio 音轨特征与互相关对齐
+  MediaPipe Pose Landmarker（VIDEO 模式）
+  33 个关键点与世界坐标
+  归一化 / 平滑 / 插值 / 镜像校正
+  DTW 动作序列对齐
+  本地评分与结构化问题
         |
         v
 Report
@@ -58,6 +52,8 @@ Report
   drills
   filming/outfit advice
 ```
+
+当前版本不依赖业务后端。原因是 MVP 不保存用户视频和历史记录，浏览器已能完成音频解码、姿态推理和指标计算；这样可以减少隐私风险和部署复杂度。用户自行配置 API Key 时，结构化分析结果可从浏览器直接发送到模型 API，仅用于自然语言总结，视频本身不会发送给大模型。
 
 ## 3. 前端页面
 

@@ -38,10 +38,9 @@ const POSE_CONNECTIONS = [
   [28, 32],
 ]
 
-const TRAIL_LANDMARKS = [15, 16, 23, 24, 27, 28]
 const DEFAULT_COLOR = '#b7f34a'
 
-function drawPoseFrame(canvas, video, frame, history = [], options = {}) {
+function drawPoseFrame(canvas, video, frame, options = {}) {
   if (!canvas || !video || !frame?.landmarks) return
 
   syncPoseCanvasSize(canvas)
@@ -51,7 +50,6 @@ function drawPoseFrame(canvas, video, frame, history = [], options = {}) {
   const rect = getVideoContentRect(canvas, video)
 
   ctx.clearRect(0, 0, canvas.width, canvas.height)
-  drawTrails(ctx, rect, history.slice(-15), color)
   drawConnections(ctx, rect, frame.landmarks, color)
   drawLandmarks(ctx, rect, frame.landmarks, color)
 }
@@ -135,28 +133,6 @@ function drawLandmarks(ctx, rect, landmarks, color) {
   })
 }
 
-function drawTrails(ctx, rect, history, color) {
-  TRAIL_LANDMARKS.forEach((landmarkIndex) => {
-    const points = history
-      .map((frame) => frame.landmarks?.[landmarkIndex])
-      .filter((landmark) => isDrawable(landmark) && (landmark.visibility ?? 0) >= VISIBILITY_THRESHOLD)
-      .map((landmark) => toCanvasPoint(rect, landmark))
-
-    if (points.length < 2) return
-
-    for (let index = 1; index < points.length; index++) {
-      const alpha = 0.12 + (index / points.length) * 0.62
-      ctx.strokeStyle = withAlpha(color, alpha)
-      ctx.lineWidth = 2 + (index / points.length) * 2
-      ctx.lineCap = 'round'
-      ctx.beginPath()
-      ctx.moveTo(points[index - 1].x, points[index - 1].y)
-      ctx.lineTo(points[index].x, points[index].y)
-      ctx.stroke()
-    }
-  })
-}
-
 function toCanvasPoint(rect, landmark) {
   return {
     x: rect.x + landmark.x * rect.width,
@@ -168,7 +144,6 @@ function isDrawable(landmark) {
   return landmark
     && Number.isFinite(landmark.x)
     && Number.isFinite(landmark.y)
-    && (landmark.visibility ?? 1) >= 0.2
 }
 
 function withAlpha(color, alpha) {
@@ -191,7 +166,6 @@ function hexToRgb(hex) {
 
 export {
   POSE_CONNECTIONS,
-  TRAIL_LANDMARKS,
   drawPoseFrame,
   clearPoseCanvas,
   syncPoseCanvasSize,

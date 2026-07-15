@@ -21,7 +21,7 @@
         <div class="workspace-title">
           <div>
             <span class="section-kicker">Frame Compare</span>
-            <h2 id="workspace-title">老师 vs 我的动作路径</h2>
+            <h2 id="workspace-title">老师 vs 我的逐帧姿态</h2>
           </div>
           <span class="live-badge">等待比对</span>
         </div>
@@ -58,14 +58,26 @@
           </article>
         </div>
 
-        <div class="compare-toolbar" id="compareToolbar" aria-label="逐帧比对控制">
-          <button class="round-tool" type="button" id="prevFrame" aria-label="后退一帧">‹</button>
-          <button class="play-tool" type="button" id="playPause" aria-label="播放/暂停">▶</button>
-          <button class="round-tool" type="button" id="nextFrame" aria-label="前进一帧">›</button>
-          <label class="frame-slider">
-            <span id="frameTime">0.00s</span>
-            <input id="frameSlider" type="range" min="0" max="1000" value="0" />
-          </label>
+        <div class="audio-align-panel" aria-labelledby="audio-align-title">
+          <div class="audio-align-head">
+            <div>
+              <span class="section-kicker">Audio Alignment</span>
+              <h3 id="audio-align-title">音轨对齐</h3>
+            </div>
+            <output id="audioAlignStatus" data-state="idle">音轨尚未对齐</output>
+          </div>
+          <div class="audio-align-controls">
+            <button class="secondary-action compact-action audio-auto-action" type="button" id="autoAlignAudio">自动对齐音轨</button>
+            <label class="offset-control">
+              <span>用户视频偏移</span>
+              <input id="audioOffsetRange" type="range" min="-30" max="30" value="0" step="0.05" />
+            </label>
+            <label class="offset-number">
+              <input id="audioOffsetInput" type="number" min="-30" max="30" value="0" step="0.05" aria-label="用户视频偏移秒数" />
+              <span>秒</span>
+            </label>
+            <button class="secondary-action compact-action" type="button" id="applyManualOffset">应用偏移</button>
+          </div>
         </div>
 
         <div class="timeline-row hidden" id="timelineRow" aria-label="AI 检测到的不匹配片段"></div>
@@ -80,7 +92,7 @@
         </div>
 
         <p class="compare-copy">
-          AI 会按每一帧的身体路径、角度和节奏差异，自动在视频上标出绿色标准路径与红色偏差路径，并生成一段总结。
+          系统会先对齐两段音轨，再用 MediaPipe 逐帧提取 33 个身体关键点，计算姿态、幅度、节奏和控制差异。
         </p>
 
         <button class="primary-action" id="analyzeButton">开始逐帧比对</button>
@@ -92,7 +104,7 @@
           <div class="spinner"></div>
           <div>
             <h2>正在逐帧对齐两段视频</h2>
-            <p id="analysisStage">正在提取老师动作路径...</p>
+            <p id="analysisStage">正在提取老师逐帧姿态...</p>
           </div>
         </div>
       </section>
@@ -115,7 +127,7 @@
 
         <div class="report-section split">
           <article>
-            <span class="section-kicker">Path Notes</span>
+            <span class="section-kicker">Pose Notes</span>
             <h3 id="drillTitle">下一次重点修正</h3>
             <ul id="drillSteps"></ul>
           </article>

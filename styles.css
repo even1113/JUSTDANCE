@@ -269,13 +269,30 @@ button {
   background: #0f1014;
 }
 
-.video-preview video {
+.video-frame {
+  position: relative;
+  min-height: 200px;
+  overflow: hidden;
+  background: #000;
+}
+
+.video-frame video {
+  display: block;
   width: 100%;
   height: 100%;
   min-height: 200px;
   border-radius: 0;
   background: #000;
   object-fit: contain;
+}
+
+.pose-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
 }
 
 .video-meta {
@@ -325,6 +342,43 @@ button {
 
 .crop-badge:hover {
   background: rgb(16 189 232 / 25%);
+}
+
+.crop-badge.locked {
+  border-color: rgb(183 243 74 / 60%);
+  background: rgb(183 243 74 / 16%);
+  color: var(--lime);
+}
+
+.subject-lock-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+}
+
+.subject-lock {
+  position: absolute;
+  min-width: 48px;
+  min-height: 48px;
+  border: 2px solid var(--lime);
+  border-radius: 8px;
+  box-shadow: 0 0 0 999px rgb(0 0 0 / 20%), 0 0 18px rgb(183 243 74 / 45%);
+}
+
+.subject-lock span {
+  position: absolute;
+  left: 6px;
+  top: -28px;
+  max-width: 132px;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: var(--lime);
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 950;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .timeline-row {
@@ -406,6 +460,11 @@ button {
   pointer-events: none;
 }
 
+.video-preview .path-overlay {
+  inset: 0 0 34px;
+  height: auto;
+}
+
 .path-overlay path,
 .path-overlay line,
 .path-overlay circle,
@@ -422,6 +481,11 @@ button {
   filter: drop-shadow(0 0 5px rgb(76 255 131 / 45%));
 }
 
+.path-standard.path-ghost {
+  opacity: 0.42;
+  stroke-width: 4;
+}
+
 .path-user {
   fill: none;
   stroke: #ff4b6b;
@@ -430,6 +494,19 @@ button {
   stroke-linejoin: round;
   stroke-dasharray: 9 7;
   filter: drop-shadow(0 0 5px rgb(255 75 107 / 45%));
+}
+
+circle.path-standard,
+circle.path-user {
+  stroke-width: 2;
+}
+
+circle.path-standard {
+  fill: #4cff83;
+}
+
+circle.path-user {
+  fill: #ff4b6b;
 }
 
 .path-angle {
@@ -451,6 +528,10 @@ button {
   font-size: 12px;
   font-weight: 900;
   line-height: 1.35;
+}
+
+.video-preview .path-label {
+  bottom: 46px;
 }
 
 .teacher-preview .path-label::before {
@@ -546,6 +627,39 @@ button {
   margin: 8px 0 0;
   color: var(--muted);
   line-height: 1.6;
+}
+
+.score-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.score-pill {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft);
+  text-align: center;
+}
+
+.score-pill span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.score-pill strong {
+  color: var(--ink);
+  font-size: 18px;
+  line-height: 1;
 }
 
 .report-section {
@@ -704,6 +818,7 @@ button {
 
 .crop-confirm:disabled {
   opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .settings-toggle {

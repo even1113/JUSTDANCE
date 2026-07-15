@@ -1,19 +1,27 @@
 import {
   AI_CONFIG,
   saveAiConfig,
+  analyzeMotionComparison,
   analyzeWithAi,
-  buildMockReport,
 } from "./ai.js";
+import {
+  previewClassForKind,
+  renderEmptyVideoPane,
+  renderUploadedVideoPane,
+} from "./components/DualVideoPlayer.js";
+import { clearPoseCanvas } from "./components/PoseCanvas.js";
+import { createVideoSync } from "./hooks/useVideoSync.js";
 
 const state = {
-  practiceFile: null,
-  referenceFile: null,
-  practiceUrl: null,
-  referenceUrl: null,
+  userFile: null,
+  teacherFile: null,
+  userVideoUrl: null,
+  teacherVideoUrl: null,
   latestReport: null,
   isPlaying: false,
   isLandscape: false,
   cropRect: null,
+  pendingCropRect: null,
   cropStart: null,
   cropDragging: false,
   cropCanvasRect: null,
@@ -35,6 +43,7 @@ const dom = {
   analysisPanel: document.querySelector("#analysisPanel"),
   analysisStage: document.querySelector("#analysisStage"),
   report: document.querySelector("#report"),
+  scoreGrid: document.querySelector("#scoreGrid"),
   issueList: document.querySelector("#issueList"),
   drillTitle: document.querySelector("#drillTitle"),
   drillSteps: document.querySelector("#drillSteps"),
@@ -52,6 +61,22 @@ const dom = {
   cropCancel: document.querySelector("#cropCancel"),
   cropConfirm: document.querySelector("#cropConfirm"),
 };
+
+const teacherVideoRef = { current: null };
+const userVideoRef = { current: null };
+const teacherCanvasRef = { current: null };
+const userCanvasRef = { current: null };
+
+const videoSync = createVideoSync({
+  teacherVideoRef,
+  userVideoRef,
+  frameSlider: dom.frameSlider,
+  frameTime: dom.frameTime,
+  playButton: dom.playPause,
+  onStateChange: (isPlaying) => {
+    state.isPlaying = isPlaying;
+  },
+});
 
 function escapeHtml(value) {
   return String(value)
@@ -78,21 +103,17 @@ function saveLatestReport(report) {
 
 function getVideoElements() {
   return {
-    reference: dom.referencePreview.querySelector("video"),
-    practice: dom.practicePreview.querySelector("video"),
+    teacher: teacherVideoRef.current,
+    user: userVideoRef.current,
+    reference: teacherVideoRef.current,
+    practice: userVideoRef.current,
   };
 }
 
-function getMaxDuration() {
-  const { reference, practice } = getVideoElements();
-  if (!reference || !practice) return 0;
-  return Math.max(reference.duration || 0, practice.duration || 0);
-}
-
 function updateLayout() {
-  const { reference, practice } = getVideoElements();
-  const refLandscape = reference && reference.videoWidth > reference.videoHeight;
-  const pracLandscape = practice && practice.videoWidth > practice.videoHeight;
+  const { teacher, user } = getVideoElements();
+  const refLandscape = teacher && teacher.videoWidth > teacher.videoHeight;
+  const pracLandscape = user && user.videoWidth > user.videoHeight;
   const anyLandscape = refLandscape || pracLandscape;
 
   state.isLandscape = anyLandscape;
@@ -100,114 +121,129 @@ function updateLayout() {
 }
 
 function syncVideosToSlider() {
-  const { reference, practice } = getVideoElements();
-  const maxDur = getMaxDuration();
-  if (maxDur <= 0) return;
-
   const ratio = Number(dom.frameSlider.value) / 1000;
-  const time = ratio * maxDur;
-
-  if (reference && !reference.paused) return;
-  if (practice && !practice.paused) return;
-
-  if (reference) reference.currentTime = time;
-  if (practice) practice.currentTime = time;
-  dom.frameTime.textContent = `${time.toFixed(2)}s`;
-}
-
-function updateSliderFromVideos() {
-  const { reference, practice } = getVideoElements();
-  const maxDur = getMaxDuration();
-  if (maxDur <= 0) return;
-
-  const video = practice || reference;
-  if (!video) return;
-
-  const ratio = video.currentTime / maxDur;
-  dom.frameSlider.value = Math.round(ratio * 1000);
-  dom.frameTime.textContent = `${video.currentTime.toFixed(2)}s`;
+  videoSync.seekToRatio(ratio);
 }
 
 function togglePlayPause() {
-  const { reference, practice } = getVideoElements();
-  if (!reference || !practice) return;
-
-  if (state.isPlaying) {
-    reference.pause();
-    practice.pause();
-    state.isPlaying = false;
-    dom.playPause.textContent = "▶";
-  } else {
-    reference.play();
-    practice.play();
-    state.isPlaying = true;
-    dom.playPause.textContent = "❚❚";
-  }
+  videoSync.togglePlayPause();
 }
 
 function stepFrame(delta) {
-  const { reference, practice } = getVideoElements();
-  const fps = 30;
-  const step = delta / fps;
-
-  if (reference) {
-    reference.pause();
-    reference.currentTime = Math.max(0, reference.currentTime + step);
-  }
-  if (practice) {
-    practice.pause();
-    practice.currentTime = Math.max(0, practice.currentTime + step);
-  }
-
-  state.isPlaying = false;
-  dom.playPause.textContent = "▶";
-  updateSliderFromVideos();
+  videoSync.stepFrame(delta);
 }
 
-function onVideoEnded() {
-  state.isPlaying = false;
-  dom.playPause.textContent = "▶";
+function pointsToPolyline(points = []) {
+  return points
+    .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
+    .map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`)
+    .join(" ");
 }
 
-function overlaySvg(kind) {
+function markerCircles(points = [], indices = [], className = "path-marker") {
+  return indices
+    .map((index) => points[index])
+    .filter(Boolean)
+    .map((point) => `<circle class="${className}" cx="${point.x.toFixed(2)}" cy="${point.y.toFixed(2)}" r="2.4" />`)
+    .join("");
+}
+
+function overlaySvg(kind, overlay) {
+  const teacherPoints = overlay?.teacherPoints || fallbackTeacherPoints;
+  const userPoints = overlay?.userPoints || fallbackUserPoints;
+  const peakIndices = overlay?.peakIndices || [Math.floor(userPoints.length / 2)];
   const isTeacher = kind === "teacher";
-  const standardPath = isTeacher
-    ? `<path class="path-standard" d="M 32 52 C 45 45, 57 49, 65 63 L 69 78 L 82 82" />
-       <path class="path-angle" d="M 67 78 L 81 82 L 88 70" />`
-    : `<path class="path-standard" d="M 31 51 C 45 44, 58 49, 66 62 L 69 78 L 82 82" />
-       <path class="path-user" d="M 31 51 C 43 48, 54 54, 59 66 L 60 79 L 73 87" />
-       <path class="path-angle" d="M 60 79 L 73 87 L 78 75" />`;
+  const teacherPolyline = pointsToPolyline(teacherPoints);
+  const userPolyline = pointsToPolyline(userPoints);
+
+  const paths = isTeacher
+    ? `<polyline class="path-standard" points="${teacherPolyline}" />${markerCircles(teacherPoints, peakIndices, "path-standard")}`
+    : `<polyline class="path-standard path-ghost" points="${teacherPolyline}" />
+       <polyline class="path-user" points="${userPolyline}" />
+       ${markerCircles(userPoints, peakIndices, "path-user")}`;
 
   return `
     <svg class="path-overlay" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-      ${standardPath}
-      <circle class="${isTeacher ? "path-standard" : "path-user"}" cx="${isTeacher ? 82 : 73}" cy="${isTeacher ? 82 : 87}" r="3" />
+      ${paths}
     </svg>
-    <div class="path-label">${isTeacher ? "老师腰胯路径连续" : "腰胯和脚下路径偏离"}</div>
+    <div class="path-label">${isTeacher ? "检测到的老师标准路径" : "检测到的用户偏差路径"}</div>
   `;
 }
 
-function renderEmpty(kind) {
-  const isPractice = kind === "practice";
-  const preview = isPractice ? dom.practicePreview : dom.referencePreview;
-  const statusEl = isPractice ? dom.practiceStatus : dom.referenceStatus;
+const fallbackTeacherPoints = [
+  { x: 30, y: 52 },
+  { x: 42, y: 47 },
+  { x: 55, y: 50 },
+  { x: 66, y: 63 },
+  { x: 70, y: 78 },
+  { x: 82, y: 82 },
+];
 
-  preview.className = `preview empty compare-preview ${isPractice ? "student-preview" : "teacher-preview"}`;
-  preview.innerHTML = `
-    <div class="empty-video">
-      <span class="play-symbol">+</span>
-      <strong>${isPractice ? "添加我的视频" : "添加老师视频"}</strong>
-      <small>点击选择视频文件</small>
-    </div>
-  `;
+const fallbackUserPoints = [
+  { x: 31, y: 52 },
+  { x: 43, y: 49 },
+  { x: 54, y: 55 },
+  { x: 59, y: 66 },
+  { x: 61, y: 79 },
+  { x: 74, y: 87 },
+];
+
+function renderEmpty(kind) {
+  const isUser = kind === "user";
+  const preview = isUser ? dom.practicePreview : dom.referencePreview;
+  const statusEl = isUser ? dom.practiceStatus : dom.referenceStatus;
+  const paneKind = isUser ? "user" : "teacher";
+
+  preview.className = `preview empty compare-preview ${previewClassForKind(paneKind)}`;
+  preview.innerHTML = renderEmptyVideoPane(paneKind);
   statusEl.textContent = "未添加";
 }
 
+function clearSubjectLockOverlay() {
+  dom.practicePreview.querySelector(".subject-lock-layer")?.remove();
+}
+
+function renderSubjectLockOverlay() {
+  clearSubjectLockOverlay();
+
+  const videoFrame = dom.practicePreview.querySelector(".video-frame");
+  const video = userVideoRef.current;
+
+  if (!videoFrame || !video || !state.cropRect || !video.videoWidth || !video.videoHeight) {
+    return;
+  }
+
+  const left = (state.cropRect.x / video.videoWidth) * 100;
+  const top = (state.cropRect.y / video.videoHeight) * 100;
+  const width = (state.cropRect.width / video.videoWidth) * 100;
+  const height = (state.cropRect.height / video.videoHeight) * 100;
+
+  videoFrame.insertAdjacentHTML(
+    "beforeend",
+    `
+      <div class="subject-lock-layer" aria-hidden="true">
+        <div
+          class="subject-lock"
+          style="left:${left.toFixed(2)}%;top:${top.toFixed(2)}%;width:${width.toFixed(2)}%;height:${height.toFixed(2)}%;"
+        >
+          <span>AI 已锁定你</span>
+        </div>
+      </div>
+    `,
+  );
+}
+
+function resetSubjectSelection() {
+  state.cropRect = null;
+  state.pendingCropRect = null;
+  clearSubjectLockOverlay();
+}
+
 function clearPreview(kind) {
-  const isPractice = kind === "practice";
-  const key = isPractice ? "practiceFile" : "referenceFile";
-  const urlKey = isPractice ? "practiceUrl" : "referenceUrl";
-  const input = isPractice ? dom.practiceInput : dom.referenceInput;
+  const isUser = kind === "user";
+  const key = isUser ? "userFile" : "teacherFile";
+  const urlKey = isUser ? "userVideoUrl" : "teacherVideoUrl";
+  const input = isUser ? dom.practiceInput : dom.referenceInput;
 
   if (state[urlKey]) {
     URL.revokeObjectURL(state[urlKey]);
@@ -215,13 +251,20 @@ function clearPreview(kind) {
 
   state[key] = null;
   state[urlKey] = null;
-  if (isPractice) state.cropRect = null;
+  if (isUser) {
+    userVideoRef.current = null;
+    userCanvasRef.current = null;
+    resetSubjectSelection();
+  } else {
+    teacherVideoRef.current = null;
+    teacherCanvasRef.current = null;
+  }
   input.value = "";
   renderEmpty(kind);
 
   state.latestReport = null;
-  state.isPlaying = false;
-  dom.playPause.textContent = "▶";
+  videoSync.pauseBoth();
+  videoSync.refresh();
   dom.report.classList.add("hidden");
   dom.timelineRow.classList.add("hidden");
   dom.liveBadge.textContent = "等待比对";
@@ -229,57 +272,54 @@ function clearPreview(kind) {
 }
 
 function renderPreview(kind, file) {
-  const isPractice = kind === "practice";
-  const preview = isPractice ? dom.practicePreview : dom.referencePreview;
-  const statusEl = isPractice ? dom.practiceStatus : dom.referenceStatus;
-  const key = isPractice ? "practiceFile" : "referenceFile";
-  const urlKey = isPractice ? "practiceUrl" : "referenceUrl";
+  const isUser = kind === "user";
+  const paneKind = isUser ? "user" : "teacher";
+  const preview = isUser ? dom.practicePreview : dom.referencePreview;
+  const statusEl = isUser ? dom.practiceStatus : dom.referenceStatus;
+  const key = isUser ? "userFile" : "teacherFile";
+  const urlKey = isUser ? "userVideoUrl" : "teacherVideoUrl";
 
   if (state[urlKey]) {
     URL.revokeObjectURL(state[urlKey]);
   }
 
+  if (isUser) resetSubjectSelection();
+
   state[key] = file;
   state[urlKey] = URL.createObjectURL(file);
-  preview.className = `preview compare-preview ${isPractice ? "student-preview" : "teacher-preview"}`;
-
-  const cropBtn = isPractice
-    ? `<button class="crop-badge" type="button" id="cropBadge">框选自己</button>`
-    : "";
-
-  preview.innerHTML = `
-    <div class="video-preview">
-      <video src="${state[urlKey]}" playsinline preload="metadata"></video>
-      <div class="video-meta">
-        <span>${escapeHtml(file.name)} · ${formatFileSize(file.size)}</span>
-        ${cropBtn}
-        <button class="remove-button" type="button">删除视频</button>
-      </div>
-    </div>
-  `;
+  preview.className = `preview compare-preview ${previewClassForKind(paneKind)}`;
+  preview.innerHTML = renderUploadedVideoPane({
+    kind: paneKind,
+    file,
+    url: state[urlKey],
+    fileSizeText: formatFileSize(file.size),
+    allowCrop: isUser,
+  });
 
   const video = preview.querySelector("video");
+  const canvas = preview.querySelector(".pose-canvas");
+  if (isUser) {
+    userVideoRef.current = video;
+    userCanvasRef.current = canvas;
+  } else {
+    teacherVideoRef.current = video;
+    teacherCanvasRef.current = canvas;
+  }
 
   video.addEventListener("loadedmetadata", () => {
     updateLayout();
     dom.frameSlider.value = 0;
     dom.frameTime.textContent = "0.00s";
+    renderSubjectLockOverlay();
+    videoSync.refresh();
   });
-
-  video.addEventListener("timeupdate", () => {
-    if (state.isPlaying) {
-      updateSliderFromVideos();
-    }
-  });
-
-  video.addEventListener("ended", onVideoEnded);
 
   preview.querySelector(".remove-button").addEventListener("click", (e) => {
     e.stopPropagation();
     clearPreview(kind);
   });
 
-  if (isPractice) {
+  if (isUser) {
     const cropBadge = preview.querySelector("#cropBadge");
     if (cropBadge) {
       cropBadge.addEventListener("click", (e) => {
@@ -291,6 +331,10 @@ function renderPreview(kind, file) {
 
   statusEl.textContent = "已添加";
   dom.liveBadge.textContent = "等待比对";
+  videoSync.refresh();
+  if (isUser) {
+    dom.formMessage.textContent = "已添加我的视频。多人或背景复杂时，建议先点「框选自己」。";
+  }
 }
 
 function handleVideoChange(kind, event) {
@@ -309,59 +353,81 @@ function handleVideoChange(kind, event) {
   renderPreview(kind, file);
 }
 
-function attachOverlayToUploadedVideo(target, kind) {
+function attachOverlayToUploadedVideo(target, kind, overlay) {
   const videoPreview = target.querySelector(".video-preview");
 
-  if (!videoPreview || videoPreview.querySelector(".path-overlay")) {
+  if (!videoPreview) {
     return;
   }
 
-  videoPreview.insertAdjacentHTML("beforeend", overlaySvg(kind));
+  videoPreview.querySelector(".path-overlay")?.remove();
+  videoPreview.querySelector(".path-label")?.remove();
+  videoPreview.insertAdjacentHTML("beforeend", overlaySvg(kind, overlay));
 }
 
-function renderDetectedPaths() {
-  attachOverlayToUploadedVideo(dom.referencePreview, "teacher");
-  attachOverlayToUploadedVideo(dom.practicePreview, "student");
+function renderDetectedPaths(report) {
+  attachOverlayToUploadedVideo(dom.referencePreview, "teacher", report?.overlay);
+  attachOverlayToUploadedVideo(dom.practicePreview, "student", report?.overlay);
 }
 
 async function runAnalysis() {
-  const { reference, practice } = getVideoElements();
+  const { teacher, user } = getVideoElements();
+  const subjectPrefix = state.cropRect ? "已锁定本人区域。" : "未框选自己，将追踪画面中最明显的运动主体。";
 
+  videoSync.pauseBoth();
   dom.analysisPanel.classList.remove("hidden");
   dom.report.classList.add("hidden");
   dom.analyzeButton.disabled = true;
-  dom.liveBadge.textContent = "逐帧比对中";
+  dom.liveBadge.textContent = state.cropRect ? "分析框选主体" : "自动追踪主体";
+  dom.analysisStage.textContent = `${subjectPrefix}正在准备逐帧比对...`;
 
   try {
-    let data;
+    const localReport = await analyzeMotionComparison(
+      teacher,
+      user,
+      state.cropRect,
+      (message) => {
+        dom.analysisStage.textContent = `${subjectPrefix}${message}`;
+      },
+      {
+        teacherCanvas: teacherCanvasRef.current,
+        userCanvas: userCanvasRef.current,
+      },
+    );
+    localReport.source = `${state.teacherFile?.name || "老师视频"} / ${state.userFile?.name || "我的视频"}`;
+
+    let data = localReport;
 
     if (AI_CONFIG.apiKey) {
-      dom.analysisStage.textContent = "正在抽取关键帧...";
-      await new Promise((r) => setTimeout(r, 300));
-
-      data = await analyzeWithAi(reference, practice, state.cropRect);
-    } else {
-      dom.analysisStage.textContent = "正在提取老师动作路径...";
-      await new Promise((r) => setTimeout(r, 520));
-      dom.analysisStage.textContent = "正在逐帧对齐你的动作...";
-      await new Promise((r) => setTimeout(r, 520));
-      dom.analysisStage.textContent = "正在标出红绿路径差异...";
-      await new Promise((r) => setTimeout(r, 520));
-      dom.analysisStage.textContent = "正在生成 AI 总结和建议...";
-      await new Promise((r) => setTimeout(r, 520));
-
-      const duration = Math.max(reference?.duration || 10, practice?.duration || 10);
-      data = buildMockReport(duration, state.cropRect);
-      data.source = `${state.referenceFile?.name || "老师视频"} / ${state.practiceFile?.name || "我的视频"}`;
+      dom.analysisStage.textContent = "正在把结构化姿态分析交给 AI 总结...";
+      try {
+        const aiReport = await analyzeWithAi(localReport.structuredAnalysis);
+        data = {
+          ...localReport,
+          ...aiReport,
+          overlay: localReport.overlay,
+          scores: localReport.scores,
+          structuredAnalysis: localReport.structuredAnalysis,
+          pipeline: localReport.pipeline,
+          source: localReport.source,
+          localMotionSummary: localReport.aiSummary,
+        };
+      } catch (aiError) {
+        data.aiSummary = `${localReport.aiSummary} 另外，多模态 AI 调用失败，已先使用本地路径检测结果。失败原因：${aiError.message}`;
+      }
     }
 
     state.latestReport = data;
-    renderDetectedPaths();
+    renderDetectedPaths(data);
     renderReport(data);
     saveLatestReport(data);
     dom.analysisPanel.classList.add("hidden");
     dom.report.classList.remove("hidden");
-    dom.liveBadge.textContent = AI_CONFIG.apiKey ? "AI 已分析" : "已标注路径";
+    if (state.cropRect) {
+      dom.liveBadge.textContent = "已分析本人";
+    } else {
+      dom.liveBadge.textContent = AI_CONFIG.apiKey ? "AI 已分析" : "已标注路径";
+    }
   } catch (err) {
     dom.analysisPanel.classList.add("hidden");
     dom.formMessage.textContent = `分析失败：${err.message}`;
@@ -396,6 +462,27 @@ function renderList(target, items) {
   target.innerHTML = items.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
 }
 
+function renderScores(scores = {}) {
+  const scoreItems = [
+    ["综合", scores.overallScore],
+    ["姿态", scores.poseSimilarity],
+    ["节奏", scores.timingScore],
+    ["幅度", scores.amplitudeScore],
+    ["控制", scores.controlScore],
+  ].filter((item) => Number.isFinite(item[1]));
+
+  dom.scoreGrid.innerHTML = scoreItems
+    .map(
+      ([label, value]) => `
+        <div class="score-pill">
+          <span>${escapeHtml(label)}</span>
+          <strong>${Math.round(value)}</strong>
+        </div>
+      `,
+    )
+    .join("");
+}
+
 function renderTimeline(report) {
   dom.timelineRow.innerHTML = report.mismatches
     .map((issue, index) => `<button type="button" data-jump="${index}">${issue.timestamp} ${escapeHtml(issue.title)}</button>`)
@@ -406,6 +493,7 @@ function renderTimeline(report) {
 function renderReport(data) {
   document.querySelector("#report-title").textContent = data.title;
   document.querySelector("#coachNote").textContent = data.aiSummary;
+  renderScores(data.scores);
   renderIssues(data.mismatches);
   renderTimeline(data);
   dom.drillTitle.textContent = `下一次练 ${data.drillPlan.durationMin} 分钟`;
@@ -414,12 +502,14 @@ function renderReport(data) {
 }
 
 function validateBeforeAnalyze() {
-  if (!state.practiceFile || !state.referenceFile) {
+  if (!state.userFile || !state.teacherFile) {
     dom.formMessage.textContent = "请同时添加老师视频和我的视频才能开始比对。";
     return false;
   }
 
-  dom.formMessage.textContent = "";
+  dom.formMessage.textContent = state.cropRect
+    ? "已确认本人区域，AI 会只分析你框选的人。"
+    : "未框选自己：AI 会默认追踪画面中最明显的运动主体；多人视频建议先框选。";
   return true;
 }
 
@@ -435,60 +525,126 @@ function highlightIssue(index) {
   card.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
+function jumpToIssue(index) {
+  const issue = state.latestReport?.mismatches?.[index];
+  if (issue?.timestamp) {
+    videoSync.pauseBoth();
+    videoSync.seekToTime(parseTimestamp(issue.timestamp));
+  }
+
+  highlightIssue(index);
+}
+
+function parseTimestamp(value) {
+  const parts = String(value).split(":").map((part) => Number(part));
+  if (parts.length !== 2 || parts.some((part) => !Number.isFinite(part))) return 0;
+  return parts[0] * 60 + parts[1];
+}
+
 function resetForRecompare() {
   state.latestReport = null;
-  state.isPlaying = false;
-  dom.playPause.textContent = "▶";
+  videoSync.pauseBoth();
   dom.report.classList.add("hidden");
   dom.timelineRow.classList.add("hidden");
   dom.liveBadge.textContent = "等待比对";
   dom.formMessage.textContent = "";
   dom.frameSlider.value = 0;
   dom.frameTime.textContent = "0.00s";
+  dom.compareStage.querySelectorAll(".path-overlay, .path-label").forEach((item) => item.remove());
+  clearPoseCanvas(teacherCanvasRef.current);
+  clearPoseCanvas(userCanvasRef.current);
 
-  const { reference, practice } = getVideoElements();
-  if (reference) {
-    reference.pause();
-    reference.currentTime = 0;
-  }
-  if (practice) {
-    practice.pause();
-    practice.currentTime = 0;
-  }
+  videoSync.seekToTime(0);
 
   dom.compareStage.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function openCropOverlay() {
-  const video = dom.practicePreview.querySelector("video");
+  const video = userVideoRef.current;
   if (!video) return;
+
+  videoSync.pauseBoth();
+  dom.formMessage.textContent = "";
+  state.pendingCropRect = state.cropRect ? { ...state.cropRect } : null;
+  state.cropDragging = false;
+  state.cropStart = null;
+  dom.cropConfirm.disabled = !state.pendingCropRect;
+  dom.cropConfirm.textContent = state.pendingCropRect ? "确认使用此区域" : "确认框选";
+  dom.cropOverlay.classList.remove("hidden");
+  drawCropFrame(video).catch((error) => {
+    dom.cropOverlay.classList.add("hidden");
+    dom.formMessage.textContent = `无法打开框选：${error.message}`;
+  });
+}
+
+function waitForVideoFrame(video) {
+  if (video.readyState >= 2 && video.videoWidth && video.videoHeight) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      cleanup();
+      reject(new Error("视频首帧还没有加载完成，请稍后再试。"));
+    }, 2500);
+
+    const cleanup = () => {
+      window.clearTimeout(timeout);
+      video.removeEventListener("loadeddata", onReady);
+      video.removeEventListener("canplay", onReady);
+      video.removeEventListener("error", onError);
+    };
+
+    const onReady = () => {
+      cleanup();
+      resolve();
+    };
+
+    const onError = () => {
+      cleanup();
+      reject(new Error("视频读取失败，请重新选择视频。"));
+    };
+
+    video.addEventListener("loadeddata", onReady);
+    video.addEventListener("canplay", onReady);
+    video.addEventListener("error", onError);
+    video.load();
+  });
+}
+
+async function drawCropFrame(video) {
+  await waitForVideoFrame(video);
 
   const canvas = dom.cropCanvas;
   const ctx = canvas.getContext("2d");
 
-  video.pause();
-  video.currentTime = 0;
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-  video.addEventListener("seeked", function onSeeked() {
-    video.removeEventListener("seeked", onSeeked);
-
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-    state.cropRect = null;
-    state.cropDragging = false;
-    state.cropStart = null;
-    state.cropImage = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    dom.cropConfirm.disabled = true;
-    dom.cropOverlay.classList.remove("hidden");
-  });
+  state.cropImage = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  if (state.pendingCropRect) {
+    drawCropRect(
+      state.pendingCropRect.x,
+      state.pendingCropRect.y,
+      state.pendingCropRect.x + state.pendingCropRect.width,
+      state.pendingCropRect.y + state.pendingCropRect.height,
+    );
+  }
 }
 
 function closeCropOverlay() {
   dom.cropOverlay.classList.add("hidden");
   state.cropDragging = false;
   state.cropStart = null;
+}
+
+function cancelCropOverlay() {
+  state.pendingCropRect = state.cropRect ? { ...state.cropRect } : null;
+  closeCropOverlay();
+  dom.formMessage.textContent = state.cropRect
+    ? "已取消重新框选，继续使用之前锁定的本人区域。"
+    : "已取消框选。未框选时，AI 会默认追踪画面中最明显的运动主体。";
 }
 
 function drawCropRect(x1, y1, x2, y2) {
@@ -527,6 +683,10 @@ function drawCropRect(x1, y1, x2, y2) {
 
 const var_lime = "#b7f34a";
 
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
 function canvasCoords(e) {
   const rect = dom.cropCanvas.getBoundingClientRect();
   const scaleX = dom.cropCanvas.width / rect.width;
@@ -534,9 +694,29 @@ function canvasCoords(e) {
   const clientX = e.touches ? e.touches[0].clientX : e.clientX;
   const clientY = e.touches ? e.touches[0].clientY : e.clientY;
   return {
-    x: (clientX - rect.left) * scaleX,
-    y: (clientY - rect.top) * scaleY,
+    x: clamp((clientX - rect.left) * scaleX, 0, dom.cropCanvas.width),
+    y: clamp((clientY - rect.top) * scaleY, 0, dom.cropCanvas.height),
   };
+}
+
+function savePendingCropRect(endPoint) {
+  if (!state.cropStart) return;
+
+  const left = Math.min(state.cropStart.x, endPoint.x);
+  const top = Math.min(state.cropStart.y, endPoint.y);
+  const w = Math.abs(endPoint.x - state.cropStart.x);
+  const h = Math.abs(endPoint.y - state.cropStart.y);
+
+  if (w > 10 && h > 10) {
+    state.pendingCropRect = {
+      x: Math.round(left),
+      y: Math.round(top),
+      width: Math.round(w),
+      height: Math.round(h),
+    };
+    dom.cropConfirm.disabled = false;
+    dom.cropConfirm.textContent = "确认锁定本人";
+  }
 }
 
 dom.cropCanvas.addEventListener("mousedown", (e) => {
@@ -554,20 +734,7 @@ dom.cropCanvas.addEventListener("mouseup", (e) => {
   if (!state.cropDragging || !state.cropStart) return;
   state.cropDragging = false;
   const cur = canvasCoords(e);
-  const left = Math.min(state.cropStart.x, cur.x);
-  const top = Math.min(state.cropStart.y, cur.y);
-  const w = Math.abs(cur.x - state.cropStart.x);
-  const h = Math.abs(cur.y - state.cropStart.y);
-
-  if (w > 10 && h > 10) {
-    state.cropRect = {
-      x: Math.round(left),
-      y: Math.round(top),
-      width: Math.round(w),
-      height: Math.round(h),
-    };
-    dom.cropConfirm.disabled = false;
-  }
+  savePendingCropRect(cur);
 });
 
 dom.cropCanvas.addEventListener("touchstart", (e) => {
@@ -592,33 +759,29 @@ dom.cropCanvas.addEventListener("touchend", (e) => {
   const scaleX = dom.cropCanvas.width / rect.width;
   const scaleY = dom.cropCanvas.height / rect.height;
   const cur = {
-    x: (touch.clientX - rect.left) * scaleX,
-    y: (touch.clientY - rect.top) * scaleY,
+    x: clamp((touch.clientX - rect.left) * scaleX, 0, dom.cropCanvas.width),
+    y: clamp((touch.clientY - rect.top) * scaleY, 0, dom.cropCanvas.height),
   };
 
-  const left = Math.min(state.cropStart.x, cur.x);
-  const top = Math.min(state.cropStart.y, cur.y);
-  const w = Math.abs(cur.x - state.cropStart.x);
-  const h = Math.abs(cur.y - state.cropStart.y);
-
-  if (w > 10 && h > 10) {
-    state.cropRect = {
-      x: Math.round(left),
-      y: Math.round(top),
-      width: Math.round(w),
-      height: Math.round(h),
-    };
-    dom.cropConfirm.disabled = false;
-  }
+  savePendingCropRect(cur);
 });
 
-dom.cropCancel.addEventListener("click", closeCropOverlay);
+dom.cropCancel.addEventListener("click", cancelCropOverlay);
 
 dom.cropConfirm.addEventListener("click", () => {
-  if (!state.cropRect) return;
+  if (!state.pendingCropRect) return;
 
+  state.cropRect = { ...state.pendingCropRect };
+  state.pendingCropRect = null;
+  renderSubjectLockOverlay();
   const badge = dom.practicePreview.querySelector(".crop-badge");
-  if (badge) badge.textContent = "已框选";
+  if (badge) {
+    badge.textContent = "AI已锁定";
+    badge.classList.add("locked");
+  }
+  dom.practiceStatus.textContent = "已锁定本人";
+  dom.formMessage.textContent = "已确认：AI 会把框选区域当作真实用户本人，只分析这个区域内的动作。";
+  dom.liveBadge.textContent = "已锁定主体";
 
   closeCropOverlay();
 });
@@ -635,8 +798,8 @@ dom.referencePreview.addEventListener("click", () => {
   }
 });
 
-dom.practiceInput.addEventListener("change", (event) => handleVideoChange("practice", event));
-dom.referenceInput.addEventListener("change", (event) => handleVideoChange("reference", event));
+dom.practiceInput.addEventListener("change", (event) => handleVideoChange("user", event));
+dom.referenceInput.addEventListener("change", (event) => handleVideoChange("teacher", event));
 
 dom.frameSlider.addEventListener("input", () => {
   syncVideosToSlider();
@@ -657,12 +820,12 @@ dom.recompareButton.addEventListener("click", resetForRecompare);
 dom.timelineRow.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-jump]");
   if (button) {
-    highlightIssue(Number(button.dataset.jump));
+    jumpToIssue(Number(button.dataset.jump));
   }
 });
 
-renderEmpty("reference");
-renderEmpty("practice");
+renderEmpty("teacher");
+renderEmpty("user");
 dom.frameTime.textContent = "0.00s";
 
 const settingsPanel = document.querySelector("#settingsPanel");

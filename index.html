@@ -102,6 +102,7 @@
           <span class="section-kicker">AI Summary</span>
           <h2 id="report-title">本次比对总结</h2>
           <p id="coachNote"></p>
+          <div class="score-grid" id="scoreGrid" aria-label="姿态分析评分"></div>
         </div>
 
         <div class="report-section">
@@ -163,6 +164,13 @@
       </div>
     </main>
 
+    <script type="importmap">
+      {
+        "imports": {
+          "@mediapipe/tasks-vision": "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/vision_bundle.mjs"
+        }
+      }
+    </script>
     <script type="module" src="./app.js"></script>
   </body>
 </html>

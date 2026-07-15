@@ -1,5 +1,6 @@
 import { drawPoseFrame } from '../components/PoseCanvas.js'
 import { createPoseLandmarker } from '../hooks/usePoseLandmarker.js'
+import { alignPoseFramesToAudio } from './audioAlignment.js'
 import { analyzeMovementMetrics } from './movementMetrics.js'
 
 const POSE_PLAYBACK_RATE = 1
@@ -10,6 +11,8 @@ async function runPoseComparison({
   teacherCanvas,
   userCanvas,
   cropInfo,
+  audioAlignment,
+  onPoseFramesReady = () => {},
   onProgress = () => {},
 }) {
   if (!teacherVideo || !userVideo) {
@@ -34,17 +37,35 @@ async function runPoseComparison({
   const userPoseFrames = await extractPoseFrames(userVideo, {
     label: '我的',
     canvas: userCanvas,
-    color: '#ff5a7a',
+    color: '#b7f34a',
     history: userHistory,
     onProgress,
   })
 
+  onPoseFramesReady({
+    teacherFrames: teacherPoseFrames,
+    userFrames: userPoseFrames,
+  })
+
+  onProgress('正在按音轨偏移裁剪两段视频的共同动作区间...')
+  const audioAligned = alignPoseFramesToAudio(
+    teacherPoseFrames,
+    userPoseFrames,
+    audioAlignment,
+  )
+
   onProgress('正在做身体比例归一化、平滑和关键点补帧...')
   onProgress('正在通过 DTW 对齐老师和我的动作序列...')
-  const analysis = analyzeMovementMetrics(teacherPoseFrames, userPoseFrames)
+  const analysis = analyzeMovementMetrics(audioAligned.teacherFrames, audioAligned.userFrames)
 
   return {
     ...analysis,
+    audioAlignment: {
+      offsetSec: Number(audioAlignment?.offsetSec) || 0,
+      method: audioAlignment?.method || 'manual',
+      confidence: audioAlignment?.confidence ?? null,
+      overlapDurationSec: audioAligned.overlapDurationSec,
+    },
     poseFrameCounts: {
       teacher: teacherPoseFrames.length,
       user: userPoseFrames.length,
@@ -137,7 +158,7 @@ async function extractPoseFrames(video, options = {}) {
           if (frame) {
             frames.push(frame)
             history.push(frame)
-            if (canvas) drawPoseFrame(canvas, video, frame, history, { color })
+            if (canvas) drawPoseFrame(canvas, video, frame, { color })
             if (frames.length % 30 === 0) {
               onProgress(`${label}视频已识别 ${frames.length} 帧姿态...`)
             }
@@ -162,6 +183,61 @@ async function extractPoseFrames(video, options = {}) {
       fail(new Error(`${label}视频无法自动播放以进行逐帧识别：${error.message}`))
     })
   })
+}
+
+function createPosePlaybackRenderer(video, canvas, frames, options = {}) {
+  if (!video || !canvas || !video.requestVideoFrameCallback || frames.length === 0) {
+    return () => {}
+  }
+
+  const color = options.color || '#b7f34a'
+  let frameRequestId = null
+  let disposed = false
+
+  const renderCurrentFrame = () => {
+    if (disposed) return
+    const frame = findNearestPoseFrame(frames, video.currentTime || 0)
+    if (frame) drawPoseFrame(canvas, video, frame, { color })
+  }
+
+  const handleVideoFrame = () => {
+    if (disposed) return
+    renderCurrentFrame()
+    frameRequestId = video.requestVideoFrameCallback(handleVideoFrame)
+  }
+
+  video.addEventListener('seeked', renderCurrentFrame)
+  video.addEventListener('loadeddata', renderCurrentFrame)
+  frameRequestId = video.requestVideoFrameCallback(handleVideoFrame)
+  renderCurrentFrame()
+
+  return () => {
+    disposed = true
+    video.removeEventListener('seeked', renderCurrentFrame)
+    video.removeEventListener('loadeddata', renderCurrentFrame)
+    if (frameRequestId !== null && video.cancelVideoFrameCallback) {
+      video.cancelVideoFrameCallback(frameRequestId)
+    }
+  }
+}
+
+function findNearestPoseFrame(frames, timestamp) {
+  let low = 0
+  let high = frames.length - 1
+
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2)
+    if (frames[middle].timestamp < timestamp) low = middle + 1
+    else high = middle
+  }
+
+  const next = frames[low]
+  const previous = frames[Math.max(0, low - 1)]
+  if (!previous) return next
+  if (!next) return previous
+  return Math.abs(previous.timestamp - timestamp) <= Math.abs(next.timestamp - timestamp)
+    ? previous
+    : next
 }
 
 function buildPoseFrame(result, timestamp) {
@@ -256,6 +332,8 @@ export {
   runPoseComparison,
   extractPoseFrames,
   buildPoseFrame,
+  createPosePlaybackRenderer,
+  findNearestPoseFrame,
   ensureVideoReady,
   seekVideo,
 }

@@ -73,6 +73,7 @@ function buildStructuredAnalysisForModel(analysis) {
     amplitudeScore: analysis.amplitudeScore,
     controlScore: analysis.controlScore,
     mirroredUserVideo: analysis.mirroredUserVideo,
+    audioAlignment: analysis.audioAlignment,
     alignedFramePairs: analysis.alignedFramePairs,
     issues: analysis.issues.map((issue) => ({
       type: issue.type,
@@ -90,7 +91,10 @@ function buildSummary(analysis) {
   const weakest = weakestScore(analysis)
   const mirrorNote = analysis.mirroredUserVideo ? '系统已按镜像视频自动校正左右方向。' : ''
 
-  return `这次比对先用人体姿态识别提取 33 个关键点，再通过 DTW 对齐老师和你的动作节奏。${mirrorNote} ${strongest.label}相对最好，${weakest.label}是下一轮最值得优先修的部分。`
+  const offset = Number(analysis.audioAlignment?.offsetSec) || 0
+  const audioNote = `系统先按音轨校正了 ${Math.abs(offset).toFixed(2)} 秒的剪辑偏移，再进行姿态和 DTW 对齐。`
+
+  return `这次比对使用 MediaPipe 逐帧提取全部 33 个关键点。${audioNote}${mirrorNote} ${strongest.label}相对最好，${weakest.label}是下一轮最值得优先修的部分。`
 }
 
 function strongestScore(analysis) {

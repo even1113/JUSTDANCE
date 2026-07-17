@@ -1,1323 +1,1337 @@
+import { createIndependentVideoPlayback } from './hooks/useIndependentVideoPlayback.js'
+import { alignAudioTracks, createManualAudioAlignment } from './services/audioAlignment.js'
 import {
-  AI_CONFIG,
-  saveAiConfig,
-  analyzeMotionComparison,
-  analyzeWithAi,
-} from "./ai.js";
+  canStartAnalysis,
+  canStartProcessing,
+  createInitialAppState,
+  getActiveMismatchIndex,
+  nextTaskVersion,
+  validateVideoDuration,
+  validateVideoFile,
+} from './services/appState.js'
 import {
-  previewClassForKind,
-  renderEmptyVideoPane,
-  renderUploadedVideoPane,
-} from "./components/DualVideoPlayer.js";
+  ANALYSIS_STEPS,
+  PROCESSING_STEPS,
+  analyzeComparison,
+  cancelTask,
+  createComparisonSession,
+  deleteSessionData,
+  processVideos,
+} from './services/mockComparisonApi.js'
 import {
-  clearPoseCanvas,
-  getContainedContentRect,
-} from "./components/PoseCanvas.js";
-import { createIndependentVideoPlayback } from "./hooks/useIndependentVideoPlayback.js";
-import {
-  alignAudioTracks,
-  createManualAudioAlignment,
-  shiftAudioAlignment,
-} from "./services/audioAlignment.js";
-import { normalizeCoachingReport } from "./services/feedbackGenerator.js";
-import { createPosePlaybackRenderer } from "./services/poseExtractor.js";
+  poseFigure,
+  renderCandidateCard,
+  renderIssueCard,
+} from './components/uiComponents.js'
 
-const state = {
-  userFile: null,
-  teacherFile: null,
-  userVideoUrl: null,
-  teacherVideoUrl: null,
-  latestReport: null,
-  isLandscape: false,
-  audioAlignment: null,
-  teacherPoseRenderer: null,
-  userPoseRenderer: null,
-  cropRects: {
-    teacher: null,
-    user: null,
-  },
-  pendingCropRect: null,
-  activeCropKind: null,
-  cropStart: null,
-  cropDragging: false,
-  cropInteraction: null,
-  cropPointerId: null,
-  cropImage: null,
-  alignmentRequestId: 0,
-  activeIssueIndex: -1,
-  commonTime: 0,
-};
+const REVIEW_MODE = new URLSearchParams(window.location.search).get('review') === '1'
+const DEMO_DURATION = 32
+const VIDEO_METADATA_TIMEOUT_MS = 20000
+const DEFAULT_CROP_RECT = { x: 0.28, y: 0.08, width: 0.44, height: 0.84 }
+const FLOW_INDEX = {
+  upload: 0,
+  processing: 1,
+  'subject-selection': 1,
+  'manual-alignment': 1,
+  ready: 2,
+  analyzing: 2,
+  report: 3,
+  'blocking-error': 1,
+}
 
-const storageKey = "danceMirrorLatestReport";
+const state = createInitialAppState()
+const teacherVideoRef = { current: null }
+const userVideoRef = { current: null }
+let activeController = null
+let pendingConfirmation = null
+let toastTimer = null
+let demoTimer = null
+let activeCropRole = null
+let cropDraft = { ...DEFAULT_CROP_RECT }
+let cropPointerId = null
+let cropStartPoint = null
 
-const dom = {
-  compareStage: document.querySelector("#compareStage"),
-  practiceInput: document.querySelector("#practiceVideo"),
-  referenceInput: document.querySelector("#referenceVideo"),
-  practicePreview: document.querySelector("#practicePreview"),
-  referencePreview: document.querySelector("#referencePreview"),
-  practiceStatus: document.querySelector("#practiceStatus"),
-  referenceStatus: document.querySelector("#referenceStatus"),
-  analyzeButton: document.querySelector("#analyzeButton"),
-  formMessage: document.querySelector("#formMessage"),
-  analysisPanel: document.querySelector("#analysisPanel"),
-  analysisStage: document.querySelector("#analysisStage"),
-  report: document.querySelector("#report"),
-  scoreGrid: document.querySelector("#scoreGrid"),
-  issueList: document.querySelector("#issueList"),
-  drillTitle: document.querySelector("#drillTitle"),
-  drillSteps: document.querySelector("#drillSteps"),
-  shootingAdvice: document.querySelector("#shootingAdvice"),
-  liveBadge: document.querySelector(".live-badge"),
-  autoAlignAudio: document.querySelector("#autoAlignAudio"),
-  applyManualOffset: document.querySelector("#applyManualOffset"),
-  audioOffsetRange: document.querySelector("#audioOffsetRange"),
-  audioOffsetInput: document.querySelector("#audioOffsetInput"),
-  audioAlignStatus: document.querySelector("#audioAlignStatus"),
-  recompareButton: document.querySelector("#recompareButton"),
-  cropOverlay: document.querySelector("#cropOverlay"),
-  cropCanvas: document.querySelector("#cropCanvas"),
-  cropCancel: document.querySelector("#cropCancel"),
-  cropClear: document.querySelector("#cropClear"),
-  cropConfirm: document.querySelector("#cropConfirm"),
-  cropHint: document.querySelector("#cropHint"),
-  syncControls: document.querySelector("#syncControls"),
-  syncPlay: document.querySelector("#syncPlay"),
-  frameBack: document.querySelector("#frameBack"),
-  frameForward: document.querySelector("#frameForward"),
-  playbackRate: document.querySelector("#playbackRate"),
-  loopSegment: document.querySelector("#loopSegment"),
-  commonProgress: document.querySelector("#commonProgress"),
-  commonTime: document.querySelector("#commonTime"),
-  syncAccuracy: document.querySelector("#syncAccuracy"),
-  timelineMarkers: document.querySelector("#timelineMarkers"),
-  nudgeEarlier: document.querySelector("#nudgeEarlier"),
-  nudgeLater: document.querySelector("#nudgeLater"),
-  coachEmpty: document.querySelector("#coachEmpty"),
-  currentAdviceTime: document.querySelector("#currentAdviceTime"),
-  analysisSteps: document.querySelector("#analysisSteps"),
-};
+const elements = {
+  stageViews: [...document.querySelectorAll('[data-stage]')],
+  flowSteps: [...document.querySelectorAll('[data-flow-step]')],
+  appMain: document.querySelector('#appMain'),
+  teacherVideoInput: document.querySelector('#teacherVideoInput'),
+  userVideoInput: document.querySelector('#userVideoInput'),
+  startProcessing: document.querySelector('#startProcessing'),
+  loadDemoAssets: document.querySelector('#loadDemoAssets'),
+  processingAssets: document.querySelector('#processingAssets'),
+  processingStepper: document.querySelector('#processingStepper'),
+  processingMessage: document.querySelector('#processingMessage'),
+  subjectDescription: document.querySelector('#subjectDescription'),
+  subjectStepLabel: document.querySelector('#subjectStepLabel'),
+  subjectRoleLabel: document.querySelector('#subjectRoleLabel'),
+  subjectFrame: document.querySelector('#subjectFrame'),
+  candidateGrid: document.querySelector('#candidateGrid'),
+  confirmSubject: document.querySelector('#confirmSubject'),
+  manualSubjectBox: document.querySelector('#manualSubjectBox'),
+  cropBackdrop: document.querySelector('#cropBackdrop'),
+  cropTitle: document.querySelector('#cropTitle'),
+  cropClose: document.querySelector('#cropClose'),
+  cropStage: document.querySelector('#cropStage'),
+  cropVideo: document.querySelector('#cropVideo'),
+  cropDemo: document.querySelector('#cropDemo'),
+  cropSelection: document.querySelector('#cropSelection'),
+  cropHint: document.querySelector('#cropHint'),
+  cropReset: document.querySelector('#cropReset'),
+  cropCancel: document.querySelector('#cropCancel'),
+  cropConfirm: document.querySelector('#cropConfirm'),
+  teacherAnchorRange: document.querySelector('#teacherAnchorRange'),
+  userAnchorRange: document.querySelector('#userAnchorRange'),
+  teacherAnchorOutput: document.querySelector('#teacherAnchorOutput'),
+  userAnchorOutput: document.querySelector('#userAnchorOutput'),
+  confirmAlignment: document.querySelector('#confirmAlignment'),
+  retryAutoAlignment: document.querySelector('#retryAutoAlignment'),
+  readyWorkspaceMount: document.querySelector('#readyWorkspaceMount'),
+  reportWorkspaceMount: document.querySelector('#reportWorkspaceMount'),
+  comparisonWorkspace: document.querySelector('#comparisonWorkspace'),
+  teacherCompareVideo: document.querySelector('#teacherCompareVideo'),
+  userCompareVideo: document.querySelector('#userCompareVideo'),
+  workspaceAlignmentBadge: document.querySelector('#workspaceAlignmentBadge'),
+  sharedProgress: document.querySelector('#sharedProgress'),
+  timelineOverlay: document.querySelector('#timelineOverlay'),
+  sharedTime: document.querySelector('#sharedTime'),
+  activeNodeLabel: document.querySelector('#activeNodeLabel'),
+  sharedPlay: document.querySelector('#sharedPlay'),
+  stepBack: document.querySelector('#stepBack'),
+  stepForward: document.querySelector('#stepForward'),
+  playbackRate: document.querySelector('#playbackRate'),
+  loopSegment: document.querySelector('#loopSegment'),
+  startAnalysis: document.querySelector('#startAnalysis'),
+  reselectSubject: document.querySelector('#reselectSubject'),
+  analysisStepper: document.querySelector('#analysisStepper'),
+  analysisFallback: document.querySelector('#analysisFallback'),
+  cancelAnalysis: document.querySelector('#cancelAnalysis'),
+  reportTitle: document.querySelector('#reportTitle'),
+  coachSummaryTitle: document.querySelector('#coachSummaryTitle'),
+  coachSummaryText: document.querySelector('#coachSummaryText'),
+  issueCount: document.querySelector('#issueCount'),
+  reportIssueList: document.querySelector('#reportIssueList'),
+  practiceSteps: document.querySelector('#practiceSteps'),
+  reviewTips: document.querySelector('#reviewTips'),
+  safetyNote: document.querySelector('#safetyNote'),
+  trackingGapMessage: document.querySelector('#trackingGapMessage'),
+  deleteFromReport: document.querySelector('#deleteFromReport'),
+  blockingErrorMessage: document.querySelector('#blockingErrorMessage'),
+  retryFromError: document.querySelector('#retryFromError'),
+  privacyBackdrop: document.querySelector('#privacyBackdrop'),
+  privacyOpen: document.querySelector('#privacyOpen'),
+  footerPrivacy: document.querySelector('#footerPrivacy'),
+  privacyClose: document.querySelector('#privacyClose'),
+  privacyDone: document.querySelector('#privacyDone'),
+  deleteSession: document.querySelector('#deleteSession'),
+  confirmBackdrop: document.querySelector('#confirmBackdrop'),
+  confirmTitle: document.querySelector('#confirmTitle'),
+  confirmMessage: document.querySelector('#confirmMessage'),
+  confirmAction: document.querySelector('#confirmAction'),
+  confirmCancel: document.querySelector('#confirmCancel'),
+  confirmIcon: document.querySelector('#confirmIcon'),
+  toast: document.querySelector('#toast'),
+  reviewToolbar: document.querySelector('#reviewToolbar'),
+  scenarioSelect: document.querySelector('#scenarioSelect'),
+  reviewReset: document.querySelector('#reviewReset'),
+}
 
-const teacherVideoRef = { current: null };
-const userVideoRef = { current: null };
-const teacherCanvasRef = { current: null };
-const userCanvasRef = { current: null };
+teacherVideoRef.current = elements.teacherCompareVideo
+userVideoRef.current = elements.userCompareVideo
 
 const videoPlayback = createIndependentVideoPlayback({
   teacherVideoRef,
   userVideoRef,
-  onTimeUpdate: handleCommonTimeUpdate,
-  onPlaybackChange: handlePlaybackChange,
-});
+  onTimeUpdate: ({ commonTime }) => updateCommonTime(commonTime),
+  onPlaybackChange: ({ isPlaying, loopEnabled }) => {
+    state.isPlaying = isPlaying
+    elements.sharedPlay.textContent = isPlaying ? 'Ⅱ' : '▶'
+    elements.sharedPlay.setAttribute('aria-label', isPlaying ? '暂停双视频' : '播放双视频')
+    elements.loopSegment.classList.toggle('active', loopEnabled)
+    elements.loopSegment.setAttribute('aria-pressed', String(loopEnabled))
+  },
+})
 
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
+function setStage(stage, { focus = true } = {}) {
+  state.stage = stage
+  elements.stageViews.forEach((view) => view.classList.toggle('active', view.dataset.stage === stage))
+  renderFlowProgress(stage)
 
-function formatFileSize(bytes) {
-  if (bytes < 1024 * 1024) {
-    return `${Math.round(bytes / 1024)} KB`;
+  if (stage === 'ready' || stage === 'report') {
+    const mount = stage === 'ready' ? elements.readyWorkspaceMount : elements.reportWorkspaceMount
+    mount.append(elements.comparisonWorkspace)
+    elements.comparisonWorkspace.classList.remove('hidden')
+    renderWorkspace()
+  } else {
+    elements.comparisonWorkspace.classList.add('hidden')
+    stopPlayback()
   }
 
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  if (focus) {
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+    elements.appMain.focus({ preventScroll: true })
+  }
 }
 
-function saveLatestReport(report) {
+function renderFlowProgress(stage) {
+  const activeIndex = FLOW_INDEX[stage] ?? 0
+  elements.flowSteps.forEach((step, index) => {
+    step.classList.toggle('active', index === activeIndex)
+    step.classList.toggle('complete', index < activeIndex)
+  })
+}
+
+function renderUploadState() {
+  for (const role of ['teacher', 'user']) renderUploadCard(role)
+  const ready = canStartProcessing(state)
+  elements.startProcessing.disabled = !ready
+  elements.startProcessing.textContent = ready ? '自动准备两段视频' : '请先添加两段视频'
+}
+
+function renderUploadCard(role) {
+  const asset = state.videos[role]
+  const card = document.querySelector(`[data-upload-card="${role}"]`)
+  const dropzone = card.querySelector('.upload-dropzone')
+  const preview = card.querySelector('.upload-preview')
+  const status = card.querySelector('output')
+  const video = preview.querySelector('video')
+  const demoPose = preview.querySelector('[data-demo-pose]')
+  const fieldMessage = card.querySelector('.field-message')
+
+  status.textContent = asset ? '已添加' : '未添加'
+  card.classList.remove('has-error')
+  dropzone.classList.toggle('hidden', Boolean(asset))
+  preview.classList.toggle('hidden', !asset)
+  fieldMessage.textContent = asset?.message || ''
+  fieldMessage.classList.toggle('error', Boolean(asset?.message))
+
+  if (!asset) {
+    video.removeAttribute('src')
+    video.load()
+    demoPose.classList.add('hidden')
+    return
+  }
+
+  preview.querySelector('.upload-file-copy strong').textContent = asset.name
+  preview.querySelector('.upload-file-copy small').textContent = `${formatFileSize(asset.size)} · ${formatDuration(asset.duration)}`
+  if (asset.source === 'demo') {
+    video.classList.add('hidden')
+    demoPose.classList.remove('hidden')
+    demoPose.innerHTML = poseFigure(role, 0)
+  } else {
+    video.classList.remove('hidden')
+    demoPose.classList.add('hidden')
+    if (video.src !== asset.url) video.src = asset.url
+    primeVideoPreview(video)
+  }
+}
+
+function primeVideoPreview(video) {
+  if (!video) return
+  video.muted = true
+  video.defaultMuted = true
+  video.playsInline = true
+  video.setAttribute('playsinline', '')
+
+  const seekPreviewFrame = () => {
+    const duration = Number(video.duration)
+    if (!Number.isFinite(duration) || duration <= 0 || video.currentTime > 0.01) return
+    const previewTime = Math.min(Math.max(duration * 0.03, 0.05), 1)
+    try {
+      video.currentTime = previewTime
+    } catch {
+      // Some mobile browsers delay seeking until enough local data is available.
+    }
+  }
+
+  if (video.readyState >= 1) seekPreviewFrame()
+  else video.addEventListener('loadedmetadata', seekPreviewFrame, { once: true })
+}
+
+async function loadVideoFile(role, file) {
+  const validation = validateVideoFile(file)
+  if (!validation.valid) {
+    setFieldError(role, validation.message)
+    return
+  }
+
+  const url = URL.createObjectURL(file)
   try {
-    localStorage.setItem(storageKey, JSON.stringify(report));
-  } catch {}
-}
-
-function getVideoElements() {
-  return {
-    teacher: teacherVideoRef.current,
-    user: userVideoRef.current,
-    reference: teacherVideoRef.current,
-    practice: userVideoRef.current,
-  };
-}
-
-function updateLayout() {
-  const { teacher, user } = getVideoElements();
-  const refLandscape = teacher && teacher.videoWidth > teacher.videoHeight;
-  const pracLandscape = user && user.videoWidth > user.videoHeight;
-  state.isLandscape = Boolean(refLandscape || pracLandscape);
-  renderSubjectLockOverlay("teacher");
-  renderSubjectLockOverlay("user");
-}
-
-function handleCommonTimeUpdate({
-  commonTime,
-  duration,
-  syncErrorSec,
-}) {
-  state.commonTime = commonTime;
-  dom.commonProgress.max = String(Math.max(0, duration));
-  if (!dom.commonProgress.matches(":active")) {
-    dom.commonProgress.value = String(Math.min(commonTime, duration));
-  }
-  dom.commonTime.value = `${formatClock(commonTime)} / ${formatClock(duration)}`;
-  dom.commonTime.textContent = dom.commonTime.value;
-
-  const errorMs = Math.round(Math.abs(syncErrorSec || 0) * 1000);
-  dom.syncAccuracy.value = errorMs <= 100
-    ? `同步误差 ${errorMs}ms`
-    : "正在重新校正同步";
-  dom.syncAccuracy.textContent = dom.syncAccuracy.value;
-  updateAdviceForTime(commonTime);
-}
-
-function handlePlaybackChange({ isPlaying, loopEnabled }) {
-  dom.syncPlay.textContent = isPlaying ? "暂停" : "播放";
-  dom.syncPlay.setAttribute("aria-label", isPlaying ? "暂停双视频" : "播放双视频");
-  dom.loopSegment.setAttribute("aria-pressed", String(loopEnabled));
-  dom.loopSegment.classList.toggle("active", loopEnabled);
-}
-
-function formatClock(seconds) {
-  const safe = Math.max(0, Number(seconds) || 0);
-  const minutes = Math.floor(safe / 60);
-  const rest = safe % 60;
-  return `${String(minutes).padStart(2, "0")}:${rest.toFixed(2).padStart(5, "0")}`;
-}
-
-function previewForKind(kind) {
-  return kind === "user" ? dom.practicePreview : dom.referencePreview;
-}
-
-function statusForKind(kind) {
-  return kind === "user" ? dom.practiceStatus : dom.referenceStatus;
-}
-
-function videoForKind(kind) {
-  return kind === "user" ? userVideoRef.current : teacherVideoRef.current;
-}
-
-
-function renderEmpty(kind) {
-  const isUser = kind === "user";
-  const preview = isUser ? dom.practicePreview : dom.referencePreview;
-  const statusEl = isUser ? dom.practiceStatus : dom.referenceStatus;
-  const paneKind = isUser ? "user" : "teacher";
-
-  preview.className = `preview empty compare-preview ${previewClassForKind(paneKind)}`;
-  preview.innerHTML = renderEmptyVideoPane(paneKind);
-  statusEl.textContent = "未添加";
-}
-
-function clearSubjectLockOverlay(kind) {
-  previewForKind(kind).querySelector(".subject-lock-layer")?.remove();
-}
-
-function renderSubjectLockOverlay(kind) {
-  clearSubjectLockOverlay(kind);
-
-  const preview = previewForKind(kind);
-  const videoFrame = preview.querySelector(".video-frame");
-  const video = videoForKind(kind);
-  const cropRect = state.cropRects[kind];
-
-  if (!videoFrame || !video || !cropRect || !video.videoWidth || !video.videoHeight) {
-    return;
-  }
-
-  const frameRect = videoFrame.getBoundingClientRect();
-  const contentRect = getContainedContentRect(
-    frameRect.width,
-    frameRect.height,
-    video.videoWidth,
-    video.videoHeight,
-  );
-  const sourceWidth = cropRect.sourceWidth || video.videoWidth;
-  const sourceHeight = cropRect.sourceHeight || video.videoHeight;
-  const left = contentRect.x + (cropRect.x / sourceWidth) * contentRect.width;
-  const top = contentRect.y + (cropRect.y / sourceHeight) * contentRect.height;
-  const width = (cropRect.width / sourceWidth) * contentRect.width;
-  const height = (cropRect.height / sourceHeight) * contentRect.height;
-  const label = kind === "teacher" ? "已锁定老师人物" : "已锁定我的人物";
-
-  videoFrame.insertAdjacentHTML(
-    "beforeend",
-    `
-      <div class="subject-lock-layer" aria-hidden="true">
-        <div
-          class="subject-lock"
-          style="left:${left.toFixed(2)}px;top:${top.toFixed(2)}px;width:${width.toFixed(2)}px;height:${height.toFixed(2)}px;"
-        >
-          <span>${label}</span>
-        </div>
-      </div>
-    `,
-  );
-}
-
-function resetSubjectSelection(kind) {
-  state.cropRects[kind] = null;
-  state.pendingCropRect = null;
-  clearSubjectLockOverlay(kind);
-}
-
-function disposePoseRenderers() {
-  state.teacherPoseRenderer?.();
-  state.userPoseRenderer?.();
-  state.teacherPoseRenderer = null;
-  state.userPoseRenderer = null;
-}
-
-function resetAudioAlignment() {
-  state.audioAlignment = null;
-  state.alignmentRequestId += 1;
-  dom.audioOffsetRange.value = "0";
-  dom.audioOffsetInput.value = "0";
-  dom.audioAlignStatus.textContent = "音轨尚未对齐";
-  dom.audioAlignStatus.dataset.state = "idle";
-  dom.syncControls.classList.add("hidden");
-  dom.commonProgress.value = "0";
-  dom.commonProgress.max = "0";
-  dom.commonTime.textContent = "00:00.00 / 00:00.00";
-  dom.syncAccuracy.textContent = "同步待校准";
-  dom.timelineMarkers.innerHTML = "";
-  dom.analyzeButton.disabled = true;
-  dom.analyzeButton.textContent = "请先完成音轨校准";
-  dom.autoAlignAudio.disabled = false;
-  videoPlayback.setAlignment(null);
-}
-
-function setAudioAlignment(alignment) {
-  const offsetSec = clamp(Number(alignment.offsetSec) || 0, -30, 30);
-  const teacher = teacherVideoRef.current;
-  const user = userVideoRef.current;
-  const resolved = alignment.timeline
-    ? { ...alignment, offsetSec }
-    : createManualAudioAlignment(
-      offsetSec,
-      teacher?.duration || 0,
-      user?.duration || 0,
-    );
-  if (!resolved.timeline || resolved.timeline.duration < 0.5) {
-    state.audioAlignment = null;
-    dom.audioAlignStatus.textContent = "当前偏移下没有可播放的公共片段，请重新调整";
-    dom.audioAlignStatus.dataset.state = "error";
-    dom.syncControls.classList.add("hidden");
-    dom.analyzeButton.disabled = true;
-    dom.analyzeButton.textContent = "请先完成音轨校准";
-    videoPlayback.setAlignment(null);
-    return false;
-  }
-  state.audioAlignment = resolved;
-  dom.audioOffsetRange.value = String(offsetSec);
-  dom.audioOffsetInput.value = offsetSec.toFixed(2);
-
-  if (resolved.method?.startsWith("audio_correlation")) {
-    const drift = Math.abs(resolved.timeline?.driftSec || 0);
-    const driftText = drift >= 0.04 ? ` · 漂移校正 ${drift.toFixed(2)}s` : "";
-    dom.audioAlignStatus.textContent = `音轨已自动对齐 · 用户偏移 ${formatSignedSeconds(offsetSec)} · 可信度 ${resolved.confidence}%${driftText}`;
-  } else {
-    dom.audioAlignStatus.textContent = `已应用手动偏移 · 用户偏移 ${formatSignedSeconds(offsetSec)}`;
-  }
-  dom.audioAlignStatus.dataset.state = "ready";
-  dom.syncControls.classList.remove("hidden");
-  dom.commonProgress.max = String(resolved.timeline?.duration || 0);
-  dom.analyzeButton.disabled = false;
-  dom.analyzeButton.textContent = "开始分析";
-  videoPlayback.setAlignment(resolved);
-  renderTimelineMarkers(state.latestReport);
-  return true;
-}
-
-function formatSignedSeconds(value) {
-  const safeValue = Number(value) || 0;
-  return `${safeValue >= 0 ? "+" : ""}${safeValue.toFixed(2)}s`;
-}
-
-function clearPreview(kind) {
-  const isUser = kind === "user";
-  const key = isUser ? "userFile" : "teacherFile";
-  const urlKey = isUser ? "userVideoUrl" : "teacherVideoUrl";
-  const input = isUser ? dom.practiceInput : dom.referenceInput;
-
-  if (state[urlKey]) {
-    URL.revokeObjectURL(state[urlKey]);
-  }
-
-  state[key] = null;
-  state[urlKey] = null;
-  disposePoseRenderers();
-  resetAudioAlignment();
-  if (isUser) {
-    userVideoRef.current = null;
-    userCanvasRef.current = null;
-    resetSubjectSelection("user");
-  } else {
-    teacherVideoRef.current = null;
-    teacherCanvasRef.current = null;
-    resetSubjectSelection("teacher");
-  }
-  input.value = "";
-  renderEmpty(kind);
-
-  state.latestReport = null;
-  videoPlayback.pauseAll();
-  videoPlayback.refresh();
-  dom.report.classList.add("hidden");
-  resetCoachPanel();
-  dom.liveBadge.textContent = "等待比对";
-  updateLayout();
-}
-
-function renderPreview(kind, file) {
-  const isUser = kind === "user";
-  const paneKind = isUser ? "user" : "teacher";
-  const preview = isUser ? dom.practicePreview : dom.referencePreview;
-  const statusEl = isUser ? dom.practiceStatus : dom.referenceStatus;
-  const key = isUser ? "userFile" : "teacherFile";
-  const urlKey = isUser ? "userVideoUrl" : "teacherVideoUrl";
-
-  if (state[urlKey]) {
-    URL.revokeObjectURL(state[urlKey]);
-  }
-
-  resetSubjectSelection(paneKind);
-  disposePoseRenderers();
-  resetAudioAlignment();
-
-  state[key] = file;
-  state[urlKey] = URL.createObjectURL(file);
-  preview.className = `preview compare-preview ${previewClassForKind(paneKind)}`;
-  preview.innerHTML = renderUploadedVideoPane({
-    kind: paneKind,
-    file,
-    url: state[urlKey],
-    fileSizeText: formatFileSize(file.size),
-    allowCrop: true,
-  });
-
-  const video = preview.querySelector("video");
-  const canvas = preview.querySelector(".pose-canvas");
-  if (isUser) {
-    userVideoRef.current = video;
-    userCanvasRef.current = canvas;
-  } else {
-    teacherVideoRef.current = video;
-    teacherCanvasRef.current = canvas;
-  }
-
-  video.addEventListener("loadedmetadata", () => {
-    updateLayout();
-    renderSubjectLockOverlay(paneKind);
-    videoPlayback.refresh();
-  });
-
-  preview.querySelector(".remove-button").addEventListener("click", (e) => {
-    e.stopPropagation();
-    clearPreview(kind);
-  });
-
-  const cropBadge = preview.querySelector("[data-subject-crop]");
-  if (cropBadge) {
-    cropBadge.addEventListener("click", (e) => {
-      e.stopPropagation();
-      openCropOverlay(paneKind);
-    });
-  }
-
-  statusEl.textContent = "已添加";
-  dom.liveBadge.textContent = "等待比对";
-  videoPlayback.refresh();
-  dom.formMessage.textContent = `已添加${isUser ? "我的" : "老师"}视频。多人场景建议先点「框选人物」。`;
-  if (state.teacherFile && state.userFile) {
-    window.setTimeout(() => dom.autoAlignAudio.click(), 0);
-  }
-}
-
-function handleVideoChange(kind, event) {
-  const [file] = event.target.files;
-
-  if (!file) {
-    return;
-  }
-
-  if (!file.type.startsWith("video/")) {
-    dom.formMessage.textContent = "请选择视频文件。";
-    return;
-  }
-
-  dom.formMessage.textContent = "";
-  renderPreview(kind, file);
-}
-
-async function runAnalysis() {
-  const { teacher, user } = getVideoElements();
-  const lockedCount = Object.values(state.cropRects).filter(Boolean).length;
-  const subjectPrefix = lockedCount > 0
-    ? `已锁定 ${lockedCount} 个框选人物。`
-    : "未手动框选，将在首帧锁定最清晰的主体。";
-
-  videoPlayback.pauseAll();
-  disposePoseRenderers();
-  state.latestReport = null;
-  state.activeIssueIndex = -1;
-  dom.analysisPanel.classList.remove("hidden");
-  dom.report.classList.add("hidden");
-  resetCoachPanel("正在分析，建议会在完成后显示。");
-  resetAnalysisSteps();
-  setAnalysisStep("audio", "complete");
-  setAnalysisStep("calibration", "complete");
-  setAnalysisStep("pose", "active");
-  dom.analyzeButton.disabled = true;
-  dom.liveBadge.textContent = lockedCount > 0 ? "分析框选主体" : "锁定运动主体";
-  dom.analysisStage.textContent = `${subjectPrefix}正在准备逐帧比对...`;
-
-  try {
-    const localReport = await analyzeMotionComparison(
-      teacher,
-      user,
-      state.cropRects,
-      (message) => {
-        dom.analysisStage.textContent = `${subjectPrefix}${message}`;
-        syncAnalysisStepFromMessage(message);
-      },
-      {
-        teacherCanvas: teacherCanvasRef.current,
-        userCanvas: userCanvasRef.current,
-        audioAlignment: state.audioAlignment,
-        onTrackingStatus: ({ kind, status, message }) => {
-          setTrackingStatus(kind, status, message);
-        },
-        onPoseFramesReady: ({ teacherFrames, userFrames }) => {
-          state.teacherPoseRenderer = createPosePlaybackRenderer(
-            teacherVideoRef.current,
-            teacherCanvasRef.current,
-            teacherFrames,
-            {
-              onTrackingStatus: (status) => {
-                setTrackingStatus("teacher", status);
-              },
-            },
-          );
-          state.userPoseRenderer = createPosePlaybackRenderer(
-            userVideoRef.current,
-            userCanvasRef.current,
-            userFrames,
-            {
-              onTrackingStatus: (status) => {
-                setTrackingStatus("user", status);
-              },
-            },
-          );
-        },
-      },
-    );
-    localReport.source = `${state.teacherFile?.name || "老师视频"} / ${state.userFile?.name || "我的视频"}`;
-
-    let data = localReport;
-
-    if (AI_CONFIG.apiKey) {
-      setAnalysisStep("coach", "active");
-      dom.analysisStage.textContent = "正在生成舞蹈建议...";
-      try {
-        const aiReport = await analyzeWithAi(localReport.structuredAnalysis);
-        data = normalizeCoachingReport({
-          ...localReport,
-          ...aiReport,
-          scores: localReport.scores,
-          structuredAnalysis: localReport.structuredAnalysis,
-          pipeline: localReport.pipeline,
-          source: localReport.source,
-          localMotionSummary: localReport.aiSummary,
-        }, localReport);
-      } catch {
-        data.aiSummary = `${localReport.aiSummary} 云端教练总结暂时不可用，已保留本地分析建议。`;
-      }
+    const metadata = await readVideoMetadata(url, file)
+    const durationValidation = validateVideoDuration(metadata.duration)
+    if (!durationValidation.valid) {
+      URL.revokeObjectURL(url)
+      setFieldError(role, durationValidation.message)
+      return
     }
 
-    data = normalizeCoachingReport(data, localReport);
-    state.latestReport = data;
-    renderReport(data);
-    saveLatestReport(data);
-    setAnalysisStep("coach", "complete");
-    setAnalysisStep("complete", "complete", "分析完成");
-    dom.analysisPanel.classList.add("hidden");
-    dom.report.classList.remove("hidden");
-    if (lockedCount > 0) {
-      dom.liveBadge.textContent = "已分析锁定人物";
-    } else {
-      dom.liveBadge.textContent = AI_CONFIG.apiKey ? "AI 已分析" : "分析完成";
+    revokeAssetUrl(state.videos[role])
+    state.videos[role] = {
+      role,
+      source: 'local',
+      file,
+      name: file.name,
+      type: file.type,
+      size: file.size,
+      duration: metadata.duration,
+      width: metadata.width,
+      height: metadata.height,
+      url,
     }
-    videoPlayback.seekCommon(0);
-    updateAdviceForTime(0);
-    dom.report.scrollIntoView({ behavior: "smooth", block: "start" });
-  } catch (err) {
-    markAnalysisFailed();
-    dom.analysisPanel.classList.add("hidden");
-    dom.formMessage.textContent = `分析失败：${err.message}`;
-    dom.liveBadge.textContent = "分析失败";
+    renderUploadState()
+    showToast(`${role === 'teacher' ? '老师' : '我的'}视频已添加`)
+  } catch (error) {
+    URL.revokeObjectURL(url)
+    setFieldError(role, error.userMessage || '无法读取这个视频，请重新选择 MP4 或 MOV。')
   }
-
-  dom.analyzeButton.disabled = false;
-  dom.analyzeButton.textContent = "重新分析";
 }
 
-function renderIssues(mismatches) {
-  dom.issueList.innerHTML = mismatches
-    .map(
-      (issue, index) => `
-        <article class="issue-card" data-issue-index="${index}" tabindex="0" role="button">
-          <div class="issue-topline">
-            <h3>${escapeHtml(issue.title)}</h3>
-            <span class="timestamp">${escapeHtml(formatTimeRange(issue))}</span>
-          </div>
-          <div class="coach-detail-grid">
-            <div><b>做得好的地方</b>${escapeHtml(issue.positive)}</div>
-            <div><b>动作表现</b>${escapeHtml(issue.performance)}</div>
-            <div><b>对舞蹈效果的影响</b>${escapeHtml(issue.impact)}</div>
-            <div><b>练习方法</b>${escapeHtml(issue.practice)}</div>
-            <div class="encouragement"><b>教练鼓励</b>${escapeHtml(issue.encouragement)}</div>
-          </div>
-        </article>
-      `,
-    )
-    .join("");
-  dom.coachEmpty.classList.add("hidden");
-  dom.issueList.classList.remove("hidden");
+function setFieldError(role, message) {
+  const card = document.querySelector(`[data-upload-card="${role}"]`)
+  const fieldMessage = card.querySelector('.field-message')
+  fieldMessage.textContent = message
+  fieldMessage.classList.add('error')
+  card.classList.add('has-error')
 }
 
-function renderList(target, items) {
-  target.innerHTML = items.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
-}
-
-function renderScores(scores = {}) {
-  const scoreItems = [
-    ["综合", scores.overallScore],
-    ["姿态", scores.poseSimilarity],
-    ["节奏", scores.timingScore],
-    ["幅度", scores.amplitudeScore],
-    ["控制", scores.controlScore],
-  ].filter((item) => Number.isFinite(item[1]));
-
-  dom.scoreGrid.innerHTML = scoreItems
-    .map(
-      ([label, value]) => `
-        <div class="score-pill">
-          <span>${escapeHtml(label)}</span>
-          <strong>${Math.round(value)}</strong>
-        </div>
-      `,
-    )
-    .join("");
-}
-
-function renderTimelineMarkers(report) {
-  const duration = videoPlayback.getDuration();
-  if (!report?.mismatches || duration <= 0) {
-    dom.timelineMarkers.innerHTML = "";
-    return;
+function loadDemoAssets() {
+  revokeAllAssetUrls()
+  state.videos.teacher = {
+    role: 'teacher', source: 'demo', name: '老师示范 · Wave 组合.mp4', size: 18.4 * 1024 * 1024, duration: 32,
   }
+  state.videos.user = {
+    role: 'user', source: 'demo', name: '我的练习 · 第 3 遍.mp4', size: 21.7 * 1024 * 1024, duration: 32,
+  }
+  renderUploadState()
+  showToast('演示素材已准备好，可以开始体验')
+}
 
-  dom.timelineMarkers.innerHTML = report.mismatches
-    .map((issue, index) => {
-      const start = clamp(Number(issue.startTime) || 0, 0, duration);
-      const end = clamp(Number(issue.endTime) || start + 0.4, start, duration);
-      const left = (start / duration) * 100;
-      const width = Math.max(0.5, ((end - start) / duration) * 100);
-      return `<span class="timeline-marker" data-marker-index="${index}" style="left:${left.toFixed(3)}%;width:${width.toFixed(3)}%;"></span>`;
+async function startProcessing() {
+  if (!canStartProcessing(state)) return
+  abortActiveTask()
+  nextTaskVersion(state)
+  state.error = null
+  state.processingSteps = { active: null, completed: [], steps: PROCESSING_STEPS }
+  renderAssetSummary()
+  renderStepper(elements.processingStepper, state.processingSteps)
+  setStage('processing')
+  activeController = new AbortController()
+
+  try {
+    const session = await createComparisonSession(state.videos)
+    state.sessionId = session.sessionId
+    const result = await processVideos({
+      scenario: state.scenario,
+      signal: activeController.signal,
+      onProgress(progress) {
+        state.processingSteps = progress
+        renderStepper(elements.processingStepper, progress)
+        const activeStep = progress.steps.find((step) => step.key === progress.active)
+        elements.processingMessage.textContent = activeStep?.detail || '两段视频已经准备完成'
+      },
     })
-    .join("");
+
+    state.alignment = await resolveAlignment(result.alignment)
+    state.subjectStep = 'teacher'
+    state.subjectSelections = result.needsSubjectSelection
+      ? { teacher: null, user: null }
+      : { teacher: 'person-main', user: 'person-main' }
+
+    if (result.needsSubjectSelection) {
+      renderSubjectSelection()
+      setStage('subject-selection')
+    } else if (state.alignment.status === 'manual-required') {
+      prepareManualAlignment()
+    } else {
+      setStage('ready')
+    }
+  } catch (error) {
+    if (error.name === 'AbortError') return
+    state.error = error.message || '视频处理服务暂时不可用，请稍后重试。'
+    elements.blockingErrorMessage.textContent = state.error
+    setStage('blocking-error')
+  } finally {
+    activeController = null
+  }
 }
 
-function renderReport(data) {
-  document.querySelector("#report-title").textContent = data.title;
-  document.querySelector("#coachNote").textContent = data.aiSummary;
-  renderScores(data.scores);
-  renderIssues(data.mismatches);
-  renderTimelineMarkers(data);
-  dom.drillTitle.textContent = `下一次练 ${data.drillPlan.durationMin} 分钟`;
-  renderList(dom.drillSteps, data.drillPlan.steps);
-  renderList(dom.shootingAdvice, data.reviewAdvice);
+async function resolveAlignment(mockAlignment) {
+  if (mockAlignment.status === 'manual-required') return mockAlignment
+  const bothLocal = state.videos.teacher?.source === 'local' && state.videos.user?.source === 'local'
+  if (!bothLocal) return createReadyAlignment(mockAlignment.offsetSec || 0)
+
+  try {
+    const alignment = await alignAudioTracks(state.videos.teacher.file, state.videos.user.file)
+    return { ...alignment, status: 'ready' }
+  } catch {
+    return { status: 'manual-required', offsetSec: 0, duration: getComparisonDuration() }
+  }
 }
 
-function validateBeforeAnalyze() {
-  if (!state.userFile || !state.teacherFile) {
-    dom.formMessage.textContent = "请同时添加老师视频和我的视频才能开始比对。";
-    return false;
-  }
-
-  if (!state.audioAlignment) {
-    dom.formMessage.textContent = "请先自动对齐音轨，或应用手动偏移后再开始姿态分析。";
-    return false;
-  }
-
-  const lockedCount = Object.values(state.cropRects).filter(Boolean).length;
-  dom.formMessage.textContent = lockedCount > 0
-    ? `已确认 ${lockedCount} 个目标人物，分析会持续绑定同一人物。`
-    : "未框选人物：系统会在首帧锁定最清晰主体，丢失后不会自动改跟其他人。";
-  return true;
+function renderAssetSummary() {
+  elements.processingAssets.innerHTML = ['teacher', 'user'].map((role) => {
+    const asset = state.videos[role]
+    const label = role === 'teacher' ? '老师示范' : '我的练习'
+    return `<article><span class="role-label ${role}">${label}</span><strong>${escapeHtml(asset.name)}</strong><small>${formatDuration(asset.duration)} · ${formatFileSize(asset.size)}</small></article>`
+  }).join('')
 }
 
-function highlightIssue(index, options = {}) {
-  const card = dom.issueList.querySelector(`[data-issue-index="${index}"]`);
+function renderStepper(container, progress) {
+  const completed = new Set(progress.completed || [])
+  container.innerHTML = (progress.steps || []).map((step) => {
+    const status = completed.has(step.key) ? 'complete' : progress.active === step.key ? 'active' : ''
+    const symbol = completed.has(step.key) ? '✓' : '<span></span>'
+    return `<li class="${status}"><i>${symbol}</i><div><strong>${escapeHtml(step.label)}</strong>${step.detail ? `<small>${escapeHtml(step.detail)}</small>` : ''}</div></li>`
+  }).join('')
+}
 
-  dom.issueList.querySelectorAll(".issue-card").forEach((item) => item.classList.remove("highlight"));
-  dom.timelineMarkers.querySelectorAll(".timeline-marker").forEach((item) => item.classList.remove("active"));
-  state.activeIssueIndex = card ? index : -1;
+function renderSubjectSelection() {
+  const role = state.subjectStep
+  const isTeacher = role === 'teacher'
+  const selected = state.subjectSelections[role]
+  const selectedId = getSubjectSelectionId(selected)
+  const asset = state.videos[role]
+  elements.subjectDescription.textContent = isTeacher
+    ? '老师视频里检测到多人，请选择本次需要跟踪的示范者。'
+    : '我的视频里也检测到多人，请选择你自己。后续只分析这个人。'
+  elements.subjectStepLabel.textContent = isTeacher ? '第 1 步，共 2 步' : '第 2 步，共 2 步'
+  document.querySelectorAll('.selection-progress i').forEach((item, index) => item.classList.toggle('active', index <= (isTeacher ? 0 : 1)))
+  elements.subjectFrame.innerHTML = renderSubjectFrame({ asset, role, isTeacher, selected })
+  elements.candidateGrid.innerHTML = [0, 1, 2].map((index) => renderCandidateCard({
+    id: `person-${index + 1}`,
+    role,
+    index,
+    selected: selectedId === `person-${index + 1}`,
+    label: index === 1 ? '画面中央' : `人物 ${index + 1}`,
+  })).join('')
+  elements.confirmSubject.disabled = !selected
+  elements.confirmSubject.textContent = selected ? (isTeacher ? '确认老师人物' : '确认是我') : '请选择一位人物'
 
-  if (!card) return;
-
-  card.classList.add("highlight");
-  dom.timelineMarkers.querySelector(`[data-marker-index="${index}"]`)?.classList.add("active");
-  if (options.scroll !== false) {
-    card.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  const frameVideo = elements.subjectFrame.querySelector('video')
+  const selectionBox = elements.subjectFrame.querySelector('.subject-selected-box')
+  primeVideoPreview(frameVideo)
+  if (selectionBox) {
+    const renderBox = () => positionNormalizedBox(
+      elements.subjectFrame,
+      selectionBox,
+      getNormalizedSubjectRect(selected),
+      frameVideo,
+    )
+    if (frameVideo && frameVideo.readyState < 1) frameVideo.addEventListener('loadedmetadata', renderBox, { once: true })
+    else window.requestAnimationFrame(renderBox)
   }
+}
+
+function renderSubjectFrame({ asset, role, isTeacher, selected }) {
+  const label = isTeacher ? '老师视频' : '我的视频'
+  const media = asset?.source === 'local'
+    ? `<video class="subject-source-video" src="${escapeHtml(asset.url)}" muted playsinline preload="metadata" aria-label="${label}人物框选预览"></video>`
+    : `<div class="subject-demo-frame">${poseFigure(role, 1)}</div>`
+  const selectedBox = selected
+    ? `<div class="subject-selected-box ${role}" aria-hidden="true"><span>${getSubjectSelectionId(selected) === 'manual' ? '手动框选' : '已选择'}</span></div>`
+    : ''
+
+  return `<span class="role-label ${role}">${label}</span>${media}${selectedBox}`
+}
+
+function getSubjectSelectionId(selection) {
+  return typeof selection === 'string' ? selection : selection?.id || null
+}
+
+function getNormalizedSubjectRect(selection) {
+  if (selection?.mode === 'manual' && selection.rect) {
+    const sourceWidth = Math.max(1, Number(selection.rect.sourceWidth) || 1)
+    const sourceHeight = Math.max(1, Number(selection.rect.sourceHeight) || 1)
+    return {
+      x: clamp(Number(selection.rect.x) / sourceWidth, 0, 1),
+      y: clamp(Number(selection.rect.y) / sourceHeight, 0, 1),
+      width: clamp(Number(selection.rect.width) / sourceWidth, 0.01, 1),
+      height: clamp(Number(selection.rect.height) / sourceHeight, 0.01, 1),
+    }
+  }
+
+  const candidateIndex = Number(String(getSubjectSelectionId(selection) || '').replace('person-', '')) - 1
+  if (candidateIndex === 0) return { x: 0.04, y: 0.12, width: 0.28, height: 0.76 }
+  if (candidateIndex === 2) return { x: 0.68, y: 0.12, width: 0.28, height: 0.76 }
+  return { ...DEFAULT_CROP_RECT }
+}
+
+function selectSubject(id) {
+  state.subjectSelections[state.subjectStep] = id
+  renderSubjectSelection()
+}
+
+function confirmSubject() {
+  if (!state.subjectSelections[state.subjectStep]) return
+  if (state.subjectStep === 'teacher') {
+    state.subjectStep = 'user'
+    renderSubjectSelection()
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+    return
+  }
+  if (state.alignment?.status === 'manual-required') prepareManualAlignment()
+  else setStage('ready')
+}
+
+function openSubjectCrop() {
+  activeCropRole = state.subjectStep
+  const asset = state.videos[activeCropRole]
+  const roleLabel = activeCropRole === 'teacher' ? '老师视频' : '我的视频'
+  elements.cropTitle.textContent = `框选${roleLabel}里要持续跟踪的人`
+  elements.cropBackdrop.classList.remove('hidden')
+  document.body.classList.add('modal-open')
+  elements.cropVideo.classList.toggle('hidden', asset?.source !== 'local')
+  elements.cropDemo.classList.toggle('hidden', asset?.source === 'local')
+  cropDraft = getNormalizedSubjectRect(state.subjectSelections[activeCropRole])
+  elements.cropHint.textContent = '在人物全身外侧拖动一个框。框选区域会换算到视频原始尺寸，不受手机屏幕缩放影响。'
+
+  if (asset?.source === 'local') {
+    elements.cropVideo.src = asset.url
+    const handleReady = () => {
+      if (Number.isFinite(elements.cropVideo.duration) && elements.cropVideo.duration > 0) {
+        elements.cropVideo.currentTime = Math.min(0.05, elements.cropVideo.duration / 2)
+      }
+      renderCropDraft()
+    }
+    if (elements.cropVideo.readyState >= 1) handleReady()
+    else elements.cropVideo.addEventListener('loadedmetadata', handleReady, { once: true })
+  } else {
+    elements.cropVideo.removeAttribute('src')
+    elements.cropVideo.load()
+    elements.cropDemo.innerHTML = poseFigure(activeCropRole, 1)
+    window.requestAnimationFrame(renderCropDraft)
+  }
+
+  elements.cropClose.focus({ preventScroll: true })
+}
+
+function closeSubjectCrop() {
+  elements.cropBackdrop.classList.add('hidden')
+  document.body.classList.remove('modal-open')
+  cropPointerId = null
+  cropStartPoint = null
+  activeCropRole = null
+  elements.cropVideo.removeAttribute('src')
+  elements.cropVideo.load()
+  elements.manualSubjectBox.focus({ preventScroll: true })
+}
+
+function resetCropDraft() {
+  cropDraft = { ...DEFAULT_CROP_RECT }
+  elements.cropHint.textContent = '已恢复到中央区域。你仍可在画面上拖动，重新框住目标人物。'
+  renderCropDraft()
+}
+
+function confirmSubjectCrop() {
+  if (!activeCropRole || cropDraft.width < 0.04 || cropDraft.height < 0.04) {
+    elements.cropHint.textContent = '框选范围太小，请把人物的头、手臂和双脚都包含在框内。'
+    return
+  }
+
+  const asset = state.videos[activeCropRole]
+  const sourceWidth = Number(elements.cropVideo.videoWidth) || Number(asset?.width) || 1
+  const sourceHeight = Number(elements.cropVideo.videoHeight) || Number(asset?.height) || 1
+  state.subjectSelections[activeCropRole] = {
+    id: 'manual',
+    mode: 'manual',
+    rect: {
+      x: cropDraft.x * sourceWidth,
+      y: cropDraft.y * sourceHeight,
+      width: cropDraft.width * sourceWidth,
+      height: cropDraft.height * sourceHeight,
+      sourceWidth,
+      sourceHeight,
+    },
+  }
+  const roleLabel = activeCropRole === 'teacher' ? '老师' : '我的'
+  closeSubjectCrop()
+  renderSubjectSelection()
+  showToast(`已锁定${roleLabel}视频中的框选人物`)
+}
+
+function startCropPointer(event) {
+  if (event.button !== undefined && event.button !== 0) return
+  cropPointerId = event.pointerId
+  cropStartPoint = getCropPointerPosition(event)
+  cropDraft = { x: cropStartPoint.x, y: cropStartPoint.y, width: 0, height: 0 }
+  elements.cropStage.setPointerCapture?.(event.pointerId)
+  event.preventDefault()
+  renderCropDraft()
+}
+
+function moveCropPointer(event) {
+  if (cropPointerId === null || event.pointerId !== cropPointerId || !cropStartPoint) return
+  const point = getCropPointerPosition(event)
+  cropDraft = {
+    x: Math.min(cropStartPoint.x, point.x),
+    y: Math.min(cropStartPoint.y, point.y),
+    width: Math.abs(point.x - cropStartPoint.x),
+    height: Math.abs(point.y - cropStartPoint.y),
+  }
+  event.preventDefault()
+  renderCropDraft()
+}
+
+function endCropPointer(event) {
+  if (cropPointerId === null || event.pointerId !== cropPointerId) return
+  const point = getCropPointerPosition(event)
+  if (cropDraft.width < 0.04 || cropDraft.height < 0.04) {
+    cropDraft = {
+      x: clamp(point.x - 0.2, 0, 0.6),
+      y: clamp(point.y - 0.38, 0, 0.24),
+      width: 0.4,
+      height: 0.76,
+    }
+  }
+  elements.cropStage.releasePointerCapture?.(event.pointerId)
+  cropPointerId = null
+  cropStartPoint = null
+  elements.cropHint.textContent = '已画好跟踪区域。确认人物完整入框后，点击“确认框选”。'
+  event.preventDefault()
+  renderCropDraft()
+}
+
+function cancelCropPointer(event) {
+  if (cropPointerId === null || event.pointerId !== cropPointerId) return
+  elements.cropStage.releasePointerCapture?.(event.pointerId)
+  cropPointerId = null
+  cropStartPoint = null
+  renderCropDraft()
+}
+
+function getCropPointerPosition(event) {
+  const stageRect = elements.cropStage.getBoundingClientRect()
+  const contentRect = getContainedMediaRect(
+    stageRect.width,
+    stageRect.height,
+    elements.cropVideo.classList.contains('hidden') ? stageRect.width : elements.cropVideo.videoWidth,
+    elements.cropVideo.classList.contains('hidden') ? stageRect.height : elements.cropVideo.videoHeight,
+  )
+  const localX = clamp(event.clientX - stageRect.left - contentRect.left, 0, contentRect.width)
+  const localY = clamp(event.clientY - stageRect.top - contentRect.top, 0, contentRect.height)
+  return {
+    x: contentRect.width ? localX / contentRect.width : 0.5,
+    y: contentRect.height ? localY / contentRect.height : 0.5,
+  }
+}
+
+function renderCropDraft() {
+  positionNormalizedBox(elements.cropStage, elements.cropSelection, cropDraft, elements.cropVideo.classList.contains('hidden') ? null : elements.cropVideo)
+}
+
+function positionNormalizedBox(stage, box, normalizedRect, video = null) {
+  if (!stage || !box || !normalizedRect) return
+  const mediaRect = getContainedMediaRect(
+    stage.clientWidth,
+    stage.clientHeight,
+    video?.videoWidth,
+    video?.videoHeight,
+  )
+  box.style.left = `${mediaRect.left + normalizedRect.x * mediaRect.width}px`
+  box.style.top = `${mediaRect.top + normalizedRect.y * mediaRect.height}px`
+  box.style.width = `${normalizedRect.width * mediaRect.width}px`
+  box.style.height = `${normalizedRect.height * mediaRect.height}px`
+}
+
+function getContainedMediaRect(containerWidth, containerHeight, mediaWidth, mediaHeight) {
+  const safeContainerWidth = Math.max(1, Number(containerWidth) || 1)
+  const safeContainerHeight = Math.max(1, Number(containerHeight) || 1)
+  const safeMediaWidth = Math.max(1, Number(mediaWidth) || safeContainerWidth)
+  const safeMediaHeight = Math.max(1, Number(mediaHeight) || safeContainerHeight)
+  const scale = Math.min(safeContainerWidth / safeMediaWidth, safeContainerHeight / safeMediaHeight)
+  const width = safeMediaWidth * scale
+  const height = safeMediaHeight * scale
+  return {
+    left: (safeContainerWidth - width) / 2,
+    top: (safeContainerHeight - height) / 2,
+    width,
+    height,
+  }
+}
+
+function prepareManualAlignment() {
+  state.manualAnchors = { teacher: null, user: null }
+  elements.teacherAnchorOutput.textContent = '尚未选择'
+  elements.userAnchorOutput.textContent = '尚未选择'
+  elements.confirmAlignment.disabled = true
+  document.querySelectorAll('.calibration-video').forEach((frame, index) => {
+    frame.innerHTML = poseFigure(index === 0 ? 'teacher' : 'user', index)
+  })
+  setStage('manual-alignment')
+}
+
+function setManualAnchor(role) {
+  const input = role === 'teacher' ? elements.teacherAnchorRange : elements.userAnchorRange
+  const output = role === 'teacher' ? elements.teacherAnchorOutput : elements.userAnchorOutput
+  state.manualAnchors[role] = Number(input.value)
+  output.textContent = `${formatTime(input.value)} 已选择`
+  elements.confirmAlignment.disabled = !Number.isFinite(state.manualAnchors.teacher) || !Number.isFinite(state.manualAnchors.user)
+}
+
+function confirmManualAlignment() {
+  const offset = state.manualAnchors.user - state.manualAnchors.teacher
+  const alignment = createManualAudioAlignment(
+    offset,
+    state.videos.teacher.duration,
+    state.videos.user.duration,
+  )
+  state.alignment = { ...alignment, status: 'ready' }
+  showToast('动作起点已对齐')
+  setStage('ready')
+}
+
+function createReadyAlignment(offsetSec = 0) {
+  const alignment = createManualAudioAlignment(
+    offsetSec,
+    state.videos.teacher?.duration || DEMO_DURATION,
+    state.videos.user?.duration || DEMO_DURATION,
+  )
+  return { ...alignment, method: 'audio', status: 'ready' }
+}
+
+function renderWorkspace() {
+  const isDemo = state.videos.teacher?.source === 'demo'
+  const duration = getComparisonDuration()
+  elements.sharedProgress.max = String(duration)
+  elements.sharedProgress.value = String(Math.min(state.commonTime, duration))
+  elements.workspaceAlignmentBadge.textContent = state.alignment?.method === 'manual' ? '手动校准完成' : '音乐同步完成'
+
+  for (const role of ['teacher', 'user']) {
+    const video = role === 'teacher' ? elements.teacherCompareVideo : elements.userCompareVideo
+    const demoPose = document.querySelector(`[data-demo-workspace="${role}"]`)
+    const asset = state.videos[role]
+    if (asset?.source === 'local') {
+      video.classList.remove('hidden')
+      demoPose.classList.add('hidden')
+      if (video.src !== asset.url) video.src = asset.url
+    } else {
+      video.classList.add('hidden')
+      demoPose.classList.remove('hidden')
+      demoPose.innerHTML = poseFigure(role, Math.floor(state.commonTime / 4) % 3)
+    }
+    renderWorkspaceSubjectLock(role)
+  }
+
+  if (!isDemo && state.alignment?.timeline) {
+    videoPlayback.refresh()
+    videoPlayback.setAlignment(state.alignment)
+  }
+  renderTimeline()
+  updateCommonTime(state.commonTime, { skipIssueRender: true })
+}
+
+function renderWorkspaceSubjectLock(role) {
+  const video = role === 'teacher' ? elements.teacherCompareVideo : elements.userCompareVideo
+  const viewport = video.closest('.viewport-media')
+  const box = viewport?.querySelector('.subject-lock-box')
+  const normalizedRect = getNormalizedSubjectRect(state.subjectSelections[role])
+  const position = () => positionNormalizedBox(
+    viewport,
+    box,
+    normalizedRect,
+    video.classList.contains('hidden') ? null : video,
+  )
+  if (!video.classList.contains('hidden') && video.readyState < 1) {
+    video.addEventListener('loadedmetadata', position, { once: true })
+  } else {
+    window.requestAnimationFrame(position)
+  }
+}
+
+function renderVisibleSubjectLocks() {
+  if (state.stage === 'subject-selection') {
+    const frameVideo = elements.subjectFrame.querySelector('video')
+    const selectionBox = elements.subjectFrame.querySelector('.subject-selected-box')
+    positionNormalizedBox(
+      elements.subjectFrame,
+      selectionBox,
+      getNormalizedSubjectRect(state.subjectSelections[state.subjectStep]),
+      frameVideo,
+    )
+  }
+  if (state.stage === 'ready' || state.stage === 'report') {
+    renderWorkspaceSubjectLock('teacher')
+    renderWorkspaceSubjectLock('user')
+  }
+  if (!elements.cropBackdrop.classList.contains('hidden')) renderCropDraft()
+}
+
+function renderTimeline() {
+  const duration = getComparisonDuration()
+  const mismatches = state.report?.mismatches || []
+  const markers = mismatches.map((item, index) => {
+    const left = clamp((item.startTime / duration) * 100, 0, 100)
+    const width = Math.max(1.5, ((item.endTime - item.startTime) / duration) * 100)
+    return `<button class="timeline-marker ${item.severity} ${index === state.activeMismatchIndex ? 'active' : ''}" style="left:${left}%;width:${width}%" type="button" data-marker-index="${index}" aria-label="跳到 ${escapeHtml(item.timestamp)}：${escapeHtml(item.title)}"></button>`
+  })
+  const gaps = (state.report?.trackingGaps || []).map((gap) => {
+    const left = clamp((gap.startTime / duration) * 100, 0, 100)
+    const width = Math.max(1.5, ((gap.endTime - gap.startTime) / duration) * 100)
+    return `<span class="timeline-gap" style="left:${left}%;width:${width}%" title="${escapeHtml(gap.message)}"></span>`
+  })
+  elements.timelineOverlay.innerHTML = markers.concat(gaps).join('')
+}
+
+async function togglePlayback() {
+  const isDemo = state.videos.teacher?.source === 'demo'
+  if (isDemo) {
+    state.isPlaying ? stopDemoPlayback() : startDemoPlayback()
+    return
+  }
+  try {
+    await videoPlayback.playPause()
+  } catch (error) {
+    showToast(error.message, 'error')
+  }
+}
+
+function startDemoPlayback() {
+  stopDemoPlayback(false)
+  state.isPlaying = true
+  elements.sharedPlay.textContent = 'Ⅱ'
+  elements.sharedPlay.setAttribute('aria-label', '暂停双视频')
+  let lastTime = performance.now()
+  demoTimer = window.setInterval(() => {
+    const now = performance.now()
+    const elapsed = ((now - lastTime) / 1000) * Number(elements.playbackRate.value)
+    lastTime = now
+    const duration = getComparisonDuration()
+    let nextTime = state.commonTime + elapsed
+    if (elements.loopSegment.getAttribute('aria-pressed') === 'true') {
+      const { start, end } = getLoopRange()
+      if (nextTime >= end) nextTime = start
+    }
+    if (nextTime >= duration) {
+      updateCommonTime(duration)
+      stopDemoPlayback()
+      return
+    }
+    updateCommonTime(nextTime)
+  }, 80)
+}
+
+function stopDemoPlayback(updateButton = true) {
+  window.clearInterval(demoTimer)
+  demoTimer = null
+  state.isPlaying = false
+  if (updateButton) {
+    elements.sharedPlay.textContent = '▶'
+    elements.sharedPlay.setAttribute('aria-label', '播放双视频')
+  }
+}
+
+function stopPlayback() {
+  stopDemoPlayback()
+  videoPlayback.pauseAll()
+}
+
+function seekCommonTime(time) {
+  const nextTime = clamp(Number(time), 0, getComparisonDuration())
+  if (state.videos.teacher?.source === 'demo') updateCommonTime(nextTime)
+  else videoPlayback.seekCommon(nextTime)
+}
+
+function updateCommonTime(commonTime, { skipIssueRender = false } = {}) {
+  const duration = getComparisonDuration()
+  state.commonTime = clamp(Number(commonTime) || 0, 0, duration)
+  elements.sharedProgress.value = String(state.commonTime)
+  elements.sharedTime.textContent = `${formatTime(state.commonTime)} / ${formatTime(duration)}`
+
+  const nextIndex = getActiveMismatchIndex(state.report?.mismatches, state.commonTime)
+  if (nextIndex !== state.activeMismatchIndex) {
+    state.activeMismatchIndex = nextIndex
+    renderTimeline()
+    if (!skipIssueRender && state.stage === 'report') renderIssueList()
+  }
+  const activeIssue = state.report?.mismatches?.[state.activeMismatchIndex]
+  elements.activeNodeLabel.textContent = activeIssue ? activeIssue.title : state.report ? '当前时间没有明显差异' : '尚未生成差异节点'
+
+  if (state.videos.teacher?.source === 'demo' && (state.stage === 'ready' || state.stage === 'report')) {
+    document.querySelectorAll('[data-demo-workspace]').forEach((pose) => {
+      pose.innerHTML = poseFigure(pose.dataset.demoWorkspace, Math.floor(state.commonTime / 4) % 3)
+    })
+  }
+}
+
+function toggleLoop() {
+  const enabled = elements.loopSegment.getAttribute('aria-pressed') !== 'true'
+  elements.loopSegment.setAttribute('aria-pressed', String(enabled))
+  elements.loopSegment.classList.toggle('active', enabled)
+  if (state.videos.teacher?.source !== 'demo') videoPlayback.setLoop(enabled, state.commonTime, 4)
+}
+
+function getLoopRange() {
+  const issue = state.report?.mismatches?.[state.activeMismatchIndex]
+  if (issue) return { start: issue.startTime, end: issue.endTime }
+  const duration = getComparisonDuration()
+  const start = clamp(state.commonTime - 2, 0, Math.max(0, duration - 4))
+  return { start, end: Math.min(duration, start + 4) }
+}
+
+async function startAnalysis() {
+  if (!canStartAnalysis(state)) {
+    showToast('请先完成目标人物确认和视频校准', 'error')
+    return
+  }
+  abortActiveTask()
+  nextTaskVersion(state)
+  state.analysisSteps = { active: null, completed: [], steps: ANALYSIS_STEPS }
+  renderStepper(elements.analysisStepper, state.analysisSteps)
+  elements.analysisFallback.classList.toggle('hidden', state.scenario !== 'model-fallback')
+  setStage('analyzing')
+  activeController = new AbortController()
+
+  try {
+    state.report = await analyzeComparison({
+      scenario: state.scenario,
+      signal: activeController.signal,
+      onProgress(progress) {
+        state.analysisSteps = progress
+        renderStepper(elements.analysisStepper, progress)
+      },
+    })
+    state.activeMismatchIndex = 0
+    state.commonTime = state.report.mismatches[0]?.startTime || 0
+    renderReport()
+    setStage('report')
+  } catch (error) {
+    if (error.name === 'AbortError') return
+    state.error = error.message || '动作分析没有完成，请稍后重试。'
+    elements.blockingErrorMessage.textContent = state.error
+    setStage('blocking-error')
+  } finally {
+    activeController = null
+  }
+}
+
+function renderReport() {
+  const report = state.report
+  elements.coachSummaryTitle.textContent = report.title
+  elements.coachSummaryText.textContent = report.aiSummary
+  elements.issueCount.textContent = `${report.mismatches.length} 个差异节点`
+  elements.reportTitle.textContent = report.fallback ? '这一遍的结构化复盘' : '这一遍的复盘'
+  elements.practiceSteps.innerHTML = report.drillPlan.steps.map((step) => `<li>${escapeHtml(step)}</li>`).join('')
+  elements.reviewTips.innerHTML = report.reviewAdvice.map((tip) => `<p><span>✓</span>${escapeHtml(tip)}</p>`).join('')
+  elements.safetyNote.textContent = report.safetyNote
+  renderIssueList()
+  renderTrackingGap()
+  renderTimeline()
+}
+
+function renderIssueList() {
+  elements.reportIssueList.innerHTML = state.report.mismatches
+    .map((issue, index) => renderIssueCard(issue, index, index === state.activeMismatchIndex))
+    .join('')
+}
+
+function renderTrackingGap() {
+  const gaps = state.report.trackingGaps || []
+  elements.trackingGapMessage.classList.toggle('hidden', gaps.length === 0)
+  elements.trackingGapMessage.innerHTML = gaps.length
+    ? `<strong>有一段画面没有稳定识别到完整身体</strong><p>${escapeHtml(gaps[0].message)}。这一段不会生成具体动作结论，你可以重新选人、重新校准或更换视频。</p>`
+    : ''
 }
 
 function jumpToIssue(index) {
-  const issue = state.latestReport?.mismatches?.[index];
-  if (issue) {
-    videoPlayback.seekCommon(Number(issue.startTime) || parseTimestamp(issue.timestamp));
+  const issue = state.report?.mismatches?.[index]
+  if (!issue) return
+  state.activeMismatchIndex = index
+  seekCommonTime(issue.startTime)
+  renderIssueList()
+  renderTimeline()
+  document.querySelector(`[data-issue-index="${index}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
+
+function requestReplaceVideo(role) {
+  openConfirmation({
+    title: '更换这段视频？',
+    message: '当前准备或分析会自动取消，已完成的校准和报告也会清除。',
+    actionLabel: '更换视频',
+    danger: false,
+    onConfirm() {
+      abortActiveTask()
+      clearResults()
+      removeVideo(role)
+      setStage('upload')
+      getVideoInput(role).click()
+    },
+  })
+}
+
+function removeVideo(role) {
+  revokeAssetUrl(state.videos[role])
+  state.videos[role] = null
+  getVideoInput(role).value = ''
+  renderUploadState()
+}
+
+function requestReturnUpload() {
+  openConfirmation({
+    title: '更换视频并开始新分析？',
+    message: '当前报告不会被保存。返回后可以重新上传两段视频。',
+    actionLabel: '返回上传页',
+    danger: false,
+    onConfirm() {
+      abortActiveTask()
+      clearResults()
+      setStage('upload')
+    },
+  })
+}
+
+function requestDeleteData() {
+  closePrivacy()
+  openConfirmation({
+    title: '删除本次数据？',
+    message: '两段视频、人物选择和本次复盘都会从当前页面清除，且无法恢复。',
+    actionLabel: '确认删除',
+    danger: true,
+    async onConfirm() {
+      elements.confirmAction.disabled = true
+      elements.confirmAction.textContent = '正在删除…'
+      await deleteSessionData(state.sessionId)
+      resetAllData()
+      closeConfirmation()
+      showToast('本次数据已删除')
+    },
+  })
+}
+
+function openPrivacy() {
+  elements.privacyBackdrop.classList.remove('hidden')
+  document.body.classList.add('modal-open')
+  elements.privacyClose.focus()
+}
+
+function closePrivacy() {
+  elements.privacyBackdrop.classList.add('hidden')
+  document.body.classList.remove('modal-open')
+}
+
+function openConfirmation({ title, message, actionLabel, danger, onConfirm }) {
+  pendingConfirmation = onConfirm
+  elements.confirmTitle.textContent = title
+  elements.confirmMessage.textContent = message
+  elements.confirmAction.textContent = actionLabel
+  elements.confirmAction.disabled = false
+  elements.confirmAction.classList.toggle('danger', danger)
+  elements.confirmAction.classList.toggle('primary', !danger)
+  elements.confirmIcon.textContent = danger ? '!' : '↗'
+  elements.confirmBackdrop.classList.remove('hidden')
+  document.body.classList.add('modal-open')
+  elements.confirmCancel.focus()
+}
+
+function closeConfirmation() {
+  pendingConfirmation = null
+  elements.confirmBackdrop.classList.add('hidden')
+  document.body.classList.remove('modal-open')
+}
+
+function showToast(message, type = 'success') {
+  window.clearTimeout(toastTimer)
+  elements.toast.classList.remove('hidden', 'error')
+  elements.toast.classList.toggle('error', type === 'error')
+  elements.toast.querySelector('span').textContent = type === 'error' ? '!' : '✓'
+  elements.toast.querySelector('p').textContent = message
+  toastTimer = window.setTimeout(() => elements.toast.classList.add('hidden'), 3200)
+}
+
+function clearResults() {
+  stopPlayback()
+  state.sessionId = null
+  state.subjectSelections = { teacher: null, user: null }
+  state.subjectStep = 'teacher'
+  state.alignment = null
+  state.manualAnchors = { teacher: null, user: null }
+  state.report = null
+  state.activeMismatchIndex = -1
+  state.commonTime = 0
+  state.error = null
+}
+
+function resetAllData() {
+  abortActiveTask()
+  revokeAllAssetUrls()
+  const scenario = state.scenario
+  Object.assign(state, createInitialAppState(), { scenario })
+  for (const input of [elements.teacherVideoInput, elements.userVideoInput]) input.value = ''
+  for (const video of [elements.teacherCompareVideo, elements.userCompareVideo]) {
+    video.removeAttribute('src')
+    video.load()
   }
-
-  highlightIssue(index);
+  renderUploadState()
+  setStage('upload')
 }
 
-function updateAdviceForTime(commonTime) {
-  const mismatches = state.latestReport?.mismatches || [];
-  const activeIndex = mismatches.findIndex((issue) => {
-    return commonTime >= Number(issue.startTime) && commonTime <= Number(issue.endTime);
-  });
-
-  if (activeIndex >= 0) {
-    const issue = mismatches[activeIndex];
-    dom.currentAdviceTime.textContent = `${formatTimeRange(issue)} · ${issue.title}`;
-    if (state.activeIssueIndex !== activeIndex) highlightIssue(activeIndex);
-    return;
-  }
-
-  if (mismatches.length > 0) {
-    dom.currentAdviceTime.textContent = "当前片段未发现明显问题";
-    if (state.activeIssueIndex !== -1) highlightIssue(-1);
-  }
+function abortActiveTask() {
+  cancelTask(activeController)
+  activeController = null
+  stopPlayback()
 }
 
-function formatTimeRange(issue) {
-  return `${formatShortTime(issue.startTime)}–${formatShortTime(issue.endTime)}`;
+function revokeAllAssetUrls() {
+  revokeAssetUrl(state.videos.teacher)
+  revokeAssetUrl(state.videos.user)
 }
 
-function formatShortTime(seconds) {
-  const safe = Math.max(0, Number(seconds) || 0);
-  const minutes = Math.floor(safe / 60);
-  const rest = Math.floor(safe % 60);
-  return `${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;
+function revokeAssetUrl(asset) {
+  if (asset?.source === 'local' && asset.url) URL.revokeObjectURL(asset.url)
 }
 
-function parseTimestamp(value) {
-  const parts = String(value).split(":").map((part) => Number(part));
-  if (parts.length !== 2 || parts.some((part) => !Number.isFinite(part))) return 0;
-  return parts[0] * 60 + parts[1];
+function getVideoInput(role) {
+  return role === 'teacher' ? elements.teacherVideoInput : elements.userVideoInput
 }
 
-function resetForRecompare() {
-  state.latestReport = null;
-  videoPlayback.pauseAll();
-  disposePoseRenderers();
-  dom.report.classList.add("hidden");
-  resetCoachPanel();
-  dom.timelineMarkers.innerHTML = "";
-  dom.liveBadge.textContent = "等待比对";
-  dom.formMessage.textContent = "";
-  clearPoseCanvas(teacherCanvasRef.current);
-  clearPoseCanvas(userCanvasRef.current);
-
-  videoPlayback.seekCommon(0);
-
-  dom.compareStage.scrollIntoView({ behavior: "smooth", block: "start" });
+function getComparisonDuration() {
+  return Number(state.alignment?.timeline?.duration)
+    || Number(state.alignment?.duration)
+    || Math.min(state.videos.teacher?.duration || DEMO_DURATION, state.videos.user?.duration || DEMO_DURATION)
 }
 
-function resetCoachPanel(message = "完成音轨校准与动作分析后，建议会按公共时间轴显示在这里。") {
-  dom.coachEmpty.textContent = message;
-  dom.coachEmpty.classList.remove("hidden");
-  dom.issueList.classList.add("hidden");
-  dom.issueList.innerHTML = "";
-  dom.currentAdviceTime.textContent = "等待分析";
-  state.activeIssueIndex = -1;
-}
-
-function resetAnalysisSteps() {
-  dom.analysisSteps.querySelectorAll("[data-analysis-step]").forEach((item) => {
-    item.dataset.state = "pending";
-  });
-}
-
-function setAnalysisStep(key, status, label = null) {
-  const item = dom.analysisSteps.querySelector(`[data-analysis-step="${key}"]`);
-  if (!item) return;
-  item.dataset.state = status;
-  if (label) item.textContent = label;
-}
-
-function syncAnalysisStepFromMessage(message) {
-  if (message.includes("识别") || message.includes("MediaPipe")) {
-    setAnalysisStep("pose", "active");
-    return;
-  }
-  if (message.includes("共同动作") || message.includes("归一化") || message.includes("DTW") || message.includes("对齐老师")) {
-    setAnalysisStep("pose", "complete");
-    setAnalysisStep("compare", "active");
-    return;
-  }
-  if (message.includes("生成舞蹈建议")) {
-    setAnalysisStep("compare", "complete");
-    setAnalysisStep("coach", "active");
-  }
-}
-
-function markAnalysisFailed() {
-  const active = dom.analysisSteps.querySelector('[data-state="active"]');
-  if (active) active.dataset.state = "error";
-  setAnalysisStep("complete", "error", "分析失败");
-}
-
-function setTrackingStatus(kind, status, message = null) {
-  const preview = previewForKind(kind);
-  const output = preview.querySelector("[data-tracking-status]");
-  if (!output) return;
-
-  output.textContent = message || (status === "lost" ? "目标人物暂时丢失" : "已锁定目标人物");
-  output.dataset.state = status;
-  output.classList.remove("hidden");
-}
-
-function openCropOverlay(kind) {
-  const video = videoForKind(kind);
-  if (!video) return;
-
-  videoPlayback.pauseAll();
-  dom.formMessage.textContent = "";
-  state.activeCropKind = kind;
-  state.pendingCropRect = state.cropRects[kind] ? { ...state.cropRects[kind] } : null;
-  state.cropDragging = false;
-  state.cropStart = null;
-  state.cropInteraction = null;
-  state.cropPointerId = null;
-  dom.cropConfirm.disabled = !state.pendingCropRect;
-  dom.cropConfirm.textContent = state.pendingCropRect ? "确认使用此区域" : "确认框选";
-  dom.cropHint.textContent = kind === "teacher"
-    ? "框选需要持续跟踪的老师人物，可拖动或拉动四角调整"
-    : "框选需要持续跟踪的自己，可拖动或拉动四角调整";
-  dom.cropOverlay.classList.remove("hidden");
-  drawCropFrame(video).catch((error) => {
-    dom.cropOverlay.classList.add("hidden");
-    dom.formMessage.textContent = `无法打开框选：${error.message}`;
-  });
-}
-
-function waitForVideoFrame(video) {
-  if (video.readyState >= 2 && video.videoWidth && video.videoHeight) {
-    return Promise.resolve();
-  }
-
+function readVideoMetadata(url, file) {
   return new Promise((resolve, reject) => {
+    const video = document.createElement('video')
+    let settled = false
     const timeout = window.setTimeout(() => {
-      cleanup();
-      reject(new Error("视频首帧还没有加载完成，请稍后再试。"));
-    }, 2500);
+      finishReject(createVideoReadError(file, null, 'timeout'))
+    }, VIDEO_METADATA_TIMEOUT_MS)
+
+    video.muted = true
+    video.defaultMuted = true
+    video.playsInline = true
+    video.setAttribute('playsinline', '')
+    video.preload = 'metadata'
+    video.style.position = 'fixed'
+    video.style.left = '-9999px'
+    video.style.width = '1px'
+    video.style.height = '1px'
+    video.style.opacity = '0'
+    video.style.pointerEvents = 'none'
 
     const cleanup = () => {
-      window.clearTimeout(timeout);
-      video.removeEventListener("loadeddata", onReady);
-      video.removeEventListener("canplay", onReady);
-      video.removeEventListener("error", onError);
-    };
+      window.clearTimeout(timeout)
+      video.removeEventListener('loadedmetadata', handleMetadata)
+      video.removeEventListener('durationchange', handleMetadata)
+      video.removeEventListener('error', handleError)
+      video.remove()
+    }
+    const finishResolve = (metadata) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve(metadata)
+    }
+    function finishReject(error) {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(error)
+    }
+    function handleMetadata() {
+      const duration = Number(video.duration)
+      if (!Number.isFinite(duration) || duration <= 0) return
+      finishResolve({
+        duration,
+        width: Number(video.videoWidth) || 0,
+        height: Number(video.videoHeight) || 0,
+      })
+    }
+    function handleError() {
+      finishReject(createVideoReadError(file, video.error))
+    }
 
-    const onReady = () => {
-      cleanup();
-      resolve();
-    };
-
-    const onError = () => {
-      cleanup();
-      reject(new Error("视频读取失败，请重新选择视频。"));
-    };
-
-    video.addEventListener("loadeddata", onReady);
-    video.addEventListener("canplay", onReady);
-    video.addEventListener("error", onError);
-    video.load();
-  });
+    video.addEventListener('loadedmetadata', handleMetadata)
+    video.addEventListener('durationchange', handleMetadata)
+    video.addEventListener('error', handleError)
+    document.body.append(video)
+    video.src = url
+    video.load()
+  })
 }
 
-async function drawCropFrame(video) {
-  await waitForVideoFrame(video);
+function createVideoReadError(file, mediaError, reason = '') {
+  const error = new Error('video-read-failed')
+  const extension = String(file?.name || '').split('.').pop()?.toUpperCase() || '视频'
+  const code = Number(mediaError?.code) || 0
 
-  const canvas = dom.cropCanvas;
-  const ctx = canvas.getContext("2d");
-
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-  state.cropImage = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  if (state.pendingCropRect) {
-    drawCropRect(
-      state.pendingCropRect.x,
-      state.pendingCropRect.y,
-      state.pendingCropRect.x + state.pendingCropRect.width,
-      state.pendingCropRect.y + state.pendingCropRect.height,
-    );
-  }
-}
-
-function closeCropOverlay() {
-  dom.cropOverlay.classList.add("hidden");
-  state.cropDragging = false;
-  state.cropStart = null;
-  state.cropInteraction = null;
-  state.cropPointerId = null;
-}
-
-function cancelCropOverlay() {
-  const kind = state.activeCropKind;
-  const existing = kind ? state.cropRects[kind] : null;
-  state.pendingCropRect = existing ? { ...existing } : null;
-  closeCropOverlay();
-  dom.formMessage.textContent = existing
-    ? "已取消调整，继续使用之前锁定的人物区域。"
-    : "已取消框选。系统会在首帧锁定一个主体，丢失后不会自动改跟其他人。";
-  state.activeCropKind = null;
-}
-
-function drawCropRect(x1, y1, x2, y2) {
-  const canvas = dom.cropCanvas;
-  const ctx = canvas.getContext("2d");
-
-  if (state.cropImage) {
-    ctx.putImageData(state.cropImage, 0, 0);
+  if (reason === 'timeout') {
+    error.userMessage = `读取 ${extension} 视频超时。请保持页面在前台后重试，或换一段更短的 H.264 MP4。`
+  } else if (code === 3 || code === 4) {
+    error.userMessage = `当前手机浏览器无法解码这段 ${extension} 视频。请改用 H.264 视频编码、AAC 音频的 MP4；MOV / HEVC 需要转码后再试。`
+  } else if (code === 2) {
+    error.userMessage = '读取视频时被浏览器中断，请保持页面在前台并重新选择。'
+  } else {
+    error.userMessage = `无法读取这段 ${extension} 视频。请重新选择，或先转换为 H.264 + AAC 的 MP4。`
   }
 
-  const left = Math.min(x1, x2);
-  const top = Math.min(y1, y2);
-  const w = Math.abs(x2 - x1);
-  const h = Math.abs(y2 - y1);
-
-  if (w < 5 || h < 5) return;
-
-  ctx.fillStyle = "rgb(0 0 0 / 40%)";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  ctx.clearRect(left, top, w, h);
-  if (state.cropImage) {
-    ctx.putImageData(
-      state.cropImage,
-      0, 0,
-      left, top, w, h,
-    );
-  }
-
-  ctx.strokeStyle = var_lime;
-  ctx.lineWidth = 3;
-  ctx.setLineDash([8, 4]);
-  ctx.strokeRect(left, top, w, h);
-  ctx.setLineDash([]);
-
-  const handleSize = Math.max(10, Math.min(canvas.width, canvas.height) * 0.018);
-  ctx.fillStyle = var_lime;
-  [
-    [left, top],
-    [left + w, top],
-    [left, top + h],
-    [left + w, top + h],
-  ].forEach(([x, y]) => {
-    ctx.fillRect(x - handleSize / 2, y - handleSize / 2, handleSize, handleSize);
-  });
+  return error
 }
 
-const var_lime = "#b7f34a";
+function handleVideoPlaybackError(role, video) {
+  const asset = state.videos[role]
+  if (!asset || asset.source !== 'local' || !video.error) return
+  const error = createVideoReadError(asset.file, video.error)
+  asset.playbackError = true
+  asset.message = error.userMessage
+  renderUploadState()
+  showToast(`${role === 'teacher' ? '老师' : '我的'}视频无法在当前浏览器播放`, 'error')
+}
+
+function formatFileSize(bytes) {
+  if (Number(bytes) < 1024 * 1024) return `${Math.round(Number(bytes) / 1024)} KB`
+  return `${(Number(bytes) / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;')
+}
+
+function formatDuration(seconds) {
+  return `${Math.max(1, Math.round(Number(seconds) || 0))} 秒`
+}
+
+function formatTime(seconds) {
+  const safeSeconds = Math.max(0, Number(seconds) || 0)
+  const minutes = Math.floor(safeSeconds / 60)
+  const remainder = Math.floor(safeSeconds % 60)
+  return `${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`
+}
 
 function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, value));
+  return Math.min(max, Math.max(min, value))
 }
 
-function canvasCoords(e) {
-  const rect = dom.cropCanvas.getBoundingClientRect();
-  const contentRect = getContainedContentRect(
-    rect.width,
-    rect.height,
-    dom.cropCanvas.width,
-    dom.cropCanvas.height,
-  );
-  const scaleX = dom.cropCanvas.width / contentRect.width;
-  const scaleY = dom.cropCanvas.height / contentRect.height;
-  return {
-    x: clamp((e.clientX - rect.left - contentRect.x) * scaleX, 0, dom.cropCanvas.width),
-    y: clamp((e.clientY - rect.top - contentRect.y) * scaleY, 0, dom.cropCanvas.height),
-  };
-}
-
-function cropRectFromPoints(start, end) {
-  return {
-    x: Math.min(start.x, end.x),
-    y: Math.min(start.y, end.y),
-    width: Math.abs(end.x - start.x),
-    height: Math.abs(end.y - start.y),
-  };
-}
-
-function findCropInteraction(point) {
-  const rect = state.pendingCropRect;
-  if (!rect) return { mode: "create" };
-
-  const hitRadius = Math.max(16, Math.min(dom.cropCanvas.width, dom.cropCanvas.height) * 0.035);
-  const corners = {
-    nw: { x: rect.x, y: rect.y },
-    ne: { x: rect.x + rect.width, y: rect.y },
-    sw: { x: rect.x, y: rect.y + rect.height },
-    se: { x: rect.x + rect.width, y: rect.y + rect.height },
-  };
-
-  const handle = Object.entries(corners).find(([, corner]) => {
-    return Math.hypot(point.x - corner.x, point.y - corner.y) <= hitRadius;
-  });
-  if (handle) return { mode: "resize", handle: handle[0], original: { ...rect } };
-
-  const inside = point.x >= rect.x
-    && point.x <= rect.x + rect.width
-    && point.y >= rect.y
-    && point.y <= rect.y + rect.height;
-  return inside
-    ? { mode: "move", original: { ...rect } }
-    : { mode: "create" };
-}
-
-function updateCropInteraction(point) {
-  const interaction = state.cropInteraction;
-  if (!interaction || !state.cropStart) return;
-
-  if (interaction.mode === "create") {
-    state.pendingCropRect = cropRectFromPoints(state.cropStart, point);
-  } else if (interaction.mode === "move") {
-    const deltaX = point.x - state.cropStart.x;
-    const deltaY = point.y - state.cropStart.y;
-    state.pendingCropRect = {
-      ...interaction.original,
-      x: clamp(interaction.original.x + deltaX, 0, dom.cropCanvas.width - interaction.original.width),
-      y: clamp(interaction.original.y + deltaY, 0, dom.cropCanvas.height - interaction.original.height),
-    };
-  } else {
-    const original = interaction.original;
-    const anchors = {
-      nw: { x: original.x + original.width, y: original.y + original.height },
-      ne: { x: original.x, y: original.y + original.height },
-      sw: { x: original.x + original.width, y: original.y },
-      se: { x: original.x, y: original.y },
-    };
-    state.pendingCropRect = cropRectFromPoints(anchors[interaction.handle], point);
-  }
-
-  const rect = state.pendingCropRect;
-  drawCropRect(rect.x, rect.y, rect.x + rect.width, rect.y + rect.height);
-  dom.cropConfirm.disabled = rect.width <= 10 || rect.height <= 10;
-  dom.cropConfirm.textContent = "确认锁定人物";
-}
-
-function finishCropInteraction() {
-  state.cropDragging = false;
-  state.cropStart = null;
-  state.cropInteraction = null;
-  state.cropPointerId = null;
-  const rect = state.pendingCropRect;
-  if (!rect || rect.width <= 10 || rect.height <= 10) {
-    dom.cropConfirm.disabled = true;
-  }
-}
-
-dom.cropCanvas.addEventListener("pointerdown", (event) => {
-  event.preventDefault();
-  if (state.cropPointerId !== null) return;
-
-  const point = canvasCoords(event);
-  state.cropDragging = true;
-  state.cropPointerId = event.pointerId;
-  state.cropStart = point;
-  state.cropInteraction = findCropInteraction(point);
-  dom.cropCanvas.setPointerCapture?.(event.pointerId);
-});
-
-dom.cropCanvas.addEventListener("pointermove", (event) => {
-  if (!state.cropDragging || event.pointerId !== state.cropPointerId) return;
-  event.preventDefault();
-  updateCropInteraction(canvasCoords(event));
-});
-
-["pointerup", "pointercancel", "lostpointercapture"].forEach((eventName) => {
-  dom.cropCanvas.addEventListener(eventName, (event) => {
-    if (state.cropPointerId !== null && event.pointerId !== state.cropPointerId) return;
-    if (eventName === "pointerup" && state.cropDragging) {
-      updateCropInteraction(canvasCoords(event));
+function bindEvents() {
+  document.querySelectorAll('[data-pick-video]').forEach((button) => {
+    button.addEventListener('click', () => getVideoInput(button.dataset.pickVideo).click())
+  })
+  elements.teacherVideoInput.addEventListener('change', async (event) => {
+    await loadVideoFile('teacher', event.target.files[0])
+    event.target.value = ''
+  })
+  elements.userVideoInput.addEventListener('change', async (event) => {
+    await loadVideoFile('user', event.target.files[0])
+    event.target.value = ''
+  })
+  document.querySelector('[data-upload-card="teacher"] video').addEventListener('error', (event) => handleVideoPlaybackError('teacher', event.currentTarget))
+  document.querySelector('[data-upload-card="user"] video').addEventListener('error', (event) => handleVideoPlaybackError('user', event.currentTarget))
+  elements.teacherCompareVideo.addEventListener('error', (event) => handleVideoPlaybackError('teacher', event.currentTarget))
+  elements.userCompareVideo.addEventListener('error', (event) => handleVideoPlaybackError('user', event.currentTarget))
+  document.querySelectorAll('[data-remove-video]').forEach((button) => button.addEventListener('click', () => removeVideo(button.dataset.removeVideo)))
+  document.querySelectorAll('[data-replace-during-task]').forEach((button) => button.addEventListener('click', () => requestReplaceVideo(button.dataset.replaceDuringTask)))
+  document.querySelectorAll('[data-return-upload]').forEach((button) => button.addEventListener('click', requestReturnUpload))
+  elements.startProcessing.addEventListener('click', startProcessing)
+  elements.loadDemoAssets.addEventListener('click', loadDemoAssets)
+  elements.candidateGrid.addEventListener('click', (event) => {
+    const candidate = event.target.closest('[data-candidate-id]')
+    if (candidate) selectSubject(candidate.dataset.candidateId)
+  })
+  elements.confirmSubject.addEventListener('click', confirmSubject)
+  elements.manualSubjectBox.addEventListener('click', openSubjectCrop)
+  elements.cropClose.addEventListener('click', closeSubjectCrop)
+  elements.cropCancel.addEventListener('click', closeSubjectCrop)
+  elements.cropReset.addEventListener('click', resetCropDraft)
+  elements.cropConfirm.addEventListener('click', confirmSubjectCrop)
+  elements.cropStage.addEventListener('pointerdown', startCropPointer)
+  elements.cropStage.addEventListener('pointermove', moveCropPointer)
+  elements.cropStage.addEventListener('pointerup', endCropPointer)
+  elements.cropStage.addEventListener('pointercancel', cancelCropPointer)
+  document.querySelectorAll('[data-set-anchor]').forEach((button) => button.addEventListener('click', () => setManualAnchor(button.dataset.setAnchor)))
+  elements.confirmAlignment.addEventListener('click', confirmManualAlignment)
+  elements.retryAutoAlignment.addEventListener('click', () => {
+    state.alignment = createReadyAlignment(1.2)
+    showToast('重新尝试成功，音乐已经对齐')
+    setStage('ready')
+  })
+  elements.sharedProgress.addEventListener('input', (event) => seekCommonTime(event.target.value))
+  elements.sharedPlay.addEventListener('click', togglePlayback)
+  elements.stepBack.addEventListener('click', () => seekCommonTime(state.commonTime - 1 / 30))
+  elements.stepForward.addEventListener('click', () => seekCommonTime(state.commonTime + 1 / 30))
+  elements.playbackRate.addEventListener('change', (event) => videoPlayback.setPlaybackRate(event.target.value))
+  elements.loopSegment.addEventListener('click', toggleLoop)
+  elements.timelineOverlay.addEventListener('click', (event) => {
+    const marker = event.target.closest('[data-marker-index]')
+    if (marker) jumpToIssue(Number(marker.dataset.markerIndex))
+  })
+  elements.startAnalysis.addEventListener('click', startAnalysis)
+  elements.cancelAnalysis.addEventListener('click', () => {
+    abortActiveTask()
+    setStage('ready')
+    showToast('已取消本次分析')
+  })
+  elements.reselectSubject.addEventListener('click', () => {
+    state.subjectStep = 'teacher'
+    renderSubjectSelection()
+    setStage('subject-selection')
+  })
+  elements.reportIssueList.addEventListener('click', (event) => {
+    const trigger = event.target.closest('[data-jump-issue]')
+    if (trigger) jumpToIssue(Number(trigger.dataset.jumpIssue))
+  })
+  elements.deleteFromReport.addEventListener('click', requestDeleteData)
+  elements.retryFromError.addEventListener('click', startProcessing)
+  elements.privacyOpen.addEventListener('click', openPrivacy)
+  elements.footerPrivacy.addEventListener('click', openPrivacy)
+  elements.privacyClose.addEventListener('click', closePrivacy)
+  elements.privacyDone.addEventListener('click', closePrivacy)
+  elements.privacyBackdrop.addEventListener('click', (event) => {
+    if (event.target === elements.privacyBackdrop) closePrivacy()
+  })
+  elements.deleteSession.addEventListener('click', requestDeleteData)
+  elements.confirmCancel.addEventListener('click', closeConfirmation)
+  elements.confirmAction.addEventListener('click', async () => {
+    const action = pendingConfirmation
+    if (!action) return
+    await action()
+    if (!elements.confirmAction.disabled) closeConfirmation()
+  })
+  elements.confirmBackdrop.addEventListener('click', (event) => {
+    if (event.target === elements.confirmBackdrop) closeConfirmation()
+  })
+  document.querySelector('.brand').addEventListener('click', (event) => {
+    event.preventDefault()
+    if (state.stage === 'upload') return
+    requestReturnUpload()
+  })
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      if (!elements.confirmBackdrop.classList.contains('hidden')) closeConfirmation()
+      else if (!elements.privacyBackdrop.classList.contains('hidden')) closePrivacy()
     }
-    finishCropInteraction();
-  });
-});
-
-dom.cropCancel.addEventListener("click", cancelCropOverlay);
-
-dom.cropClear.addEventListener("click", () => {
-  const kind = state.activeCropKind;
-  if (!kind) return;
-
-  resetSubjectSelection(kind);
-  const badge = previewForKind(kind).querySelector(".crop-badge");
-  if (badge) {
-    badge.textContent = "框选人物";
-    badge.classList.remove("locked");
-  }
-  statusForKind(kind).textContent = "已添加";
-  dom.formMessage.textContent = `${kind === "teacher" ? "老师" : "我的"}人物框选已清除，将在首帧自动锁定主体。`;
-  closeCropOverlay();
-  state.activeCropKind = null;
-});
-
-dom.cropConfirm.addEventListener("click", () => {
-  const kind = state.activeCropKind;
-  if (!state.pendingCropRect || !kind) return;
-
-  state.cropRects[kind] = {
-    x: Math.round(state.pendingCropRect.x),
-    y: Math.round(state.pendingCropRect.y),
-    width: Math.round(state.pendingCropRect.width),
-    height: Math.round(state.pendingCropRect.height),
-    sourceWidth: dom.cropCanvas.width,
-    sourceHeight: dom.cropCanvas.height,
-  };
-  state.pendingCropRect = null;
-  renderSubjectLockOverlay(kind);
-  const badge = previewForKind(kind).querySelector(".crop-badge");
-  if (badge) {
-    badge.textContent = "已锁定人物";
-    badge.classList.add("locked");
-  }
-  statusForKind(kind).textContent = "已锁定人物";
-  dom.formMessage.textContent = `已确认${kind === "teacher" ? "老师" : "我的"}目标人物；遮挡时会在原位置附近寻找，不会自动切换到其他人。`;
-  dom.liveBadge.textContent = "已锁定主体";
-
-  closeCropOverlay();
-  state.activeCropKind = null;
-});
-
-dom.practicePreview.addEventListener("click", () => {
-  if (dom.practicePreview.classList.contains("empty")) {
-    dom.practiceInput.click();
-  }
-});
-
-dom.referencePreview.addEventListener("click", () => {
-  if (dom.referencePreview.classList.contains("empty")) {
-    dom.referenceInput.click();
-  }
-});
-
-dom.practiceInput.addEventListener("change", (event) => handleVideoChange("user", event));
-dom.referenceInput.addEventListener("change", (event) => handleVideoChange("teacher", event));
-
-dom.audioOffsetRange.addEventListener("input", () => {
-  dom.audioOffsetInput.value = Number(dom.audioOffsetRange.value).toFixed(2);
-});
-
-dom.audioOffsetInput.addEventListener("input", () => {
-  const value = clamp(Number(dom.audioOffsetInput.value) || 0, -30, 30);
-  dom.audioOffsetRange.value = String(value);
-});
-
-dom.applyManualOffset.addEventListener("click", async () => {
-  if (!state.teacherFile || !state.userFile) {
-    dom.formMessage.textContent = "请先添加老师视频和我的视频。";
-    return;
-  }
-
-  try {
-    await Promise.all([
-      waitForVideoFrame(teacherVideoRef.current),
-      waitForVideoFrame(userVideoRef.current),
-    ]);
-    if (applyOffsetValue(Number(dom.audioOffsetInput.value) || 0)) {
-      dom.formMessage.textContent = "手动偏移已应用。可开启「循环 4 秒」并继续前后微调。";
-    }
-  } catch (error) {
-    dom.formMessage.textContent = `无法应用偏移：${error.message}`;
-  }
-});
-
-dom.autoAlignAudio.addEventListener("click", async () => {
-  if (!state.teacherFile || !state.userFile) {
-    dom.formMessage.textContent = "请先添加老师视频和我的视频。";
-    return;
-  }
-
-  dom.autoAlignAudio.disabled = true;
-  dom.audioAlignStatus.textContent = "正在提取并匹配两段音轨...";
-  dom.audioAlignStatus.dataset.state = "working";
-  dom.formMessage.textContent = "";
-  state.audioAlignment = null;
-  dom.syncControls.classList.add("hidden");
-  dom.analyzeButton.disabled = true;
-  dom.analyzeButton.textContent = "正在校准音轨";
-  videoPlayback.setAlignment(null);
-  const requestId = ++state.alignmentRequestId;
-
-  try {
-    const alignment = await alignAudioTracks(state.teacherFile, state.userFile);
-    if (requestId !== state.alignmentRequestId) return;
-    if (setAudioAlignment(alignment)) {
-      dom.formMessage.textContent = "音轨校准完成。公共时间轴会持续修正轻微漂移，现在可以开始分析。";
-    }
-  } catch (error) {
-    if (requestId !== state.alignmentRequestId) return;
-    state.audioAlignment = null;
-    dom.syncControls.classList.add("hidden");
-    dom.analyzeButton.disabled = true;
-    dom.analyzeButton.textContent = "请手动调整音轨";
-    videoPlayback.setAlignment(null);
-    dom.audioAlignStatus.textContent = error.message;
-    dom.audioAlignStatus.dataset.state = "error";
-    dom.formMessage.textContent = "自动对齐失败，可输入偏移秒数并应用手动标定。";
-  } finally {
-    if (requestId === state.alignmentRequestId) dom.autoAlignAudio.disabled = false;
-  }
-});
-
-function applyOffsetValue(nextOffset) {
-  state.alignmentRequestId += 1;
-  dom.autoAlignAudio.disabled = false;
-  const teacher = teacherVideoRef.current;
-  const user = userVideoRef.current;
-  const alignment = state.audioAlignment
-    ? shiftAudioAlignment(
-      state.audioAlignment,
-      clamp(nextOffset, -30, 30),
-      teacher?.duration || 0,
-      user?.duration || 0,
-    )
-    : createManualAudioAlignment(
-      clamp(nextOffset, -30, 30),
-      teacher?.duration || 0,
-      user?.duration || 0,
-    );
-  const applied = setAudioAlignment(alignment);
-  if (!applied) return false;
-  videoPlayback.seekCommon(state.commonTime);
-  return true;
+  })
+  elements.scenarioSelect.addEventListener('change', (event) => {
+    resetAllData()
+    state.scenario = event.target.value
+    loadDemoAssets()
+  })
+  elements.reviewReset.addEventListener('click', () => {
+    resetAllData()
+    loadDemoAssets()
+  })
+  window.addEventListener('resize', renderVisibleSubjectLocks, { passive: true })
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !elements.cropBackdrop.classList.contains('hidden')) closeSubjectCrop()
+  })
+  window.addEventListener('beforeunload', () => {
+    abortActiveTask()
+    revokeAllAssetUrls()
+  })
 }
 
-dom.analyzeButton.addEventListener("click", () => {
-  if (validateBeforeAnalyze()) {
-    runAnalysis();
-  }
-});
+function initialize() {
+  bindEvents()
+  renderUploadState()
+  document.querySelectorAll('.calibration-video').forEach((frame, index) => {
+    frame.innerHTML = poseFigure(index === 0 ? 'teacher' : 'user', index)
+  })
+  elements.reviewToolbar.classList.toggle('hidden', !REVIEW_MODE)
+  setStage('upload', { focus: false })
+}
 
-dom.recompareButton.addEventListener("click", resetForRecompare);
-
-dom.syncPlay.addEventListener("click", () => {
-  videoPlayback.playPause().catch((error) => {
-    dom.formMessage.textContent = error.message;
-  });
-});
-
-dom.frameBack.addEventListener("click", () => {
-  videoPlayback.stepFrame(-1);
-});
-
-dom.frameForward.addEventListener("click", () => {
-  videoPlayback.stepFrame(1);
-});
-
-dom.playbackRate.addEventListener("change", () => {
-  videoPlayback.setPlaybackRate(Number(dom.playbackRate.value));
-});
-
-dom.loopSegment.addEventListener("click", () => {
-  const enabled = dom.loopSegment.getAttribute("aria-pressed") !== "true";
-  videoPlayback.setLoop(enabled, state.commonTime, 4);
-});
-
-dom.commonProgress.addEventListener("input", () => {
-  videoPlayback.seekCommon(Number(dom.commonProgress.value));
-});
-
-dom.nudgeEarlier.addEventListener("click", () => {
-  applyOffsetValue((state.audioAlignment?.offsetSec || 0) - 0.05);
-});
-
-dom.nudgeLater.addEventListener("click", () => {
-  applyOffsetValue((state.audioAlignment?.offsetSec || 0) + 0.05);
-});
-
-dom.issueList.addEventListener("click", (event) => {
-  const card = event.target.closest("[data-issue-index]");
-  if (card) jumpToIssue(Number(card.dataset.issueIndex));
-});
-
-dom.issueList.addEventListener("keydown", (event) => {
-  if (event.key !== "Enter" && event.key !== " ") return;
-  const card = event.target.closest("[data-issue-index]");
-  if (card) {
-    event.preventDefault();
-    jumpToIssue(Number(card.dataset.issueIndex));
-  }
-});
-
-renderEmpty("teacher");
-renderEmpty("user");
-resetAudioAlignment();
-resetCoachPanel();
-
-const layoutObserver = typeof ResizeObserver === "function"
-  ? new ResizeObserver(() => updateLayout())
-  : null;
-layoutObserver?.observe(dom.compareStage);
-window.addEventListener("orientationchange", updateLayout);
-window.addEventListener("resize", updateLayout);
-window.addEventListener("beforeunload", () => {
-  layoutObserver?.disconnect();
-  videoPlayback.destroy();
-});
-
-const settingsPanel = document.querySelector("#settingsPanel");
-const settingsToggle = document.querySelector("#settingsToggle");
-const settingsClose = document.querySelector("#settingsClose");
-const settingsSave = document.querySelector("#settingsSave");
-const apiEndpointInput = document.querySelector("#apiEndpoint");
-const apiModelInput = document.querySelector("#apiModel");
-const apiKeyInput = document.querySelector("#apiKey");
-
-apiEndpointInput.value = AI_CONFIG.endpoint;
-apiModelInput.value = AI_CONFIG.model;
-apiKeyInput.value = AI_CONFIG.apiKey;
-
-settingsToggle.addEventListener("click", () => {
-  settingsPanel.classList.remove("hidden");
-});
-
-settingsClose.addEventListener("click", () => {
-  settingsPanel.classList.add("hidden");
-});
-
-settingsPanel.addEventListener("click", (e) => {
-  if (e.target === settingsPanel) {
-    settingsPanel.classList.add("hidden");
-  }
-});
-
-settingsSave.addEventListener("click", () => {
-  saveAiConfig({
-    endpoint: apiEndpointInput.value.trim(),
-    model: apiModelInput.value.trim(),
-    apiKey: apiKeyInput.value.trim(),
-  });
-  settingsPanel.classList.add("hidden");
-  dom.formMessage.textContent = AI_CONFIG.apiKey
-    ? "AI 设置已保存，下次分析会在本地结构化结果上生成教练总结。"
-    : "未填写 API Key，将继续使用浏览器本地姿态分析和教练建议。";
-});
+initialize()

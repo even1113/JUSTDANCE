@@ -1,7 +1,8 @@
-import { drawPoseFrame } from '../components/PoseCanvas.js'
+import { clearPoseCanvas, drawPoseFrame } from '../components/PoseCanvas.js'
 import { createPoseLandmarker } from '../hooks/usePoseLandmarker.js'
 import { alignPoseFramesToAudio } from './audioAlignment.js'
 import { analyzeMovementMetrics } from './movementMetrics.js'
+import { createSubjectTracker } from './subjectTracker.js'
 
 const POSE_PLAYBACK_RATE = 1
 
@@ -11,8 +12,10 @@ async function runPoseComparison({
   teacherCanvas,
   userCanvas,
   cropInfo,
+  subjectSelections,
   audioAlignment,
   onPoseFramesReady = () => {},
+  onTrackingStatus = () => {},
   onProgress = () => {},
 }) {
   if (!teacherVideo || !userVideo) {
@@ -27,18 +30,25 @@ async function runPoseComparison({
   onProgress('正在识别老师视频的人体姿态...')
   const teacherPoseFrames = await extractPoseFrames(teacherVideo, {
     label: '老师',
+    kind: 'teacher',
     canvas: teacherCanvas,
     color: '#b7f34a',
     history: teacherHistory,
+    cropRect: subjectSelections?.teacher || null,
+    onTrackingStatus,
     onProgress,
   })
 
-  onProgress(cropInfo ? '正在识别我的视频姿态（已使用框选主体提示）...' : '正在识别我的视频姿态...')
+  const userCropRect = subjectSelections?.user || cropInfo || null
+  onProgress(userCropRect ? '正在识别我的视频姿态（已锁定框选人物）...' : '正在识别我的视频姿态...')
   const userPoseFrames = await extractPoseFrames(userVideo, {
     label: '我的',
+    kind: 'user',
     canvas: userCanvas,
     color: '#b7f34a',
     history: userHistory,
+    cropRect: userCropRect,
+    onTrackingStatus,
     onProgress,
   })
 
@@ -65,10 +75,15 @@ async function runPoseComparison({
       method: audioAlignment?.method || 'manual',
       confidence: audioAlignment?.confidence ?? null,
       overlapDurationSec: audioAligned.overlapDurationSec,
+      timeline: audioAligned.timeline,
     },
     poseFrameCounts: {
       teacher: teacherPoseFrames.length,
       user: userPoseFrames.length,
+    },
+    tracking: {
+      teacher: teacherPoseFrames.tracking,
+      user: userPoseFrames.tracking,
     },
   }
 }
@@ -76,9 +91,12 @@ async function runPoseComparison({
 async function extractPoseFrames(video, options = {}) {
   const {
     label = '视频',
+    kind = 'user',
     canvas = null,
     color = '#b7f34a',
     history = [],
+    cropRect = null,
+    onTrackingStatus = () => {},
     onProgress = () => {},
   } = options
 
@@ -94,8 +112,15 @@ async function extractPoseFrames(video, options = {}) {
   await ensureVideoReady(video)
   await seekVideo(video, 0)
 
-  const landmarker = await createPoseLandmarker()
+  const landmarker = await createPoseLandmarker({ numPoses: 4 })
+  const tracker = createSubjectTracker({
+    cropRect,
+    videoWidth: video.videoWidth,
+    videoHeight: video.videoHeight,
+    trackId: `${kind}-subject`,
+  })
   const frames = []
+  const lostIntervals = []
 
   video.muted = true
   video.playbackRate = POSE_PLAYBACK_RATE
@@ -104,6 +129,27 @@ async function extractPoseFrames(video, options = {}) {
     let finished = false
     let frameRequestId = null
     let lastTimestampMs = -1
+    let lostStart = null
+    let lastTrackingStatus = null
+
+    const updateTrackingStatus = (status, mediaTime) => {
+      if (status === 'lost' && lostStart === null) lostStart = mediaTime
+      if (status === 'tracked' && lostStart !== null) {
+        lostIntervals.push({
+          startTime: lostStart,
+          endTime: mediaTime,
+        })
+        lostStart = null
+      }
+      if (status !== lastTrackingStatus) {
+        lastTrackingStatus = status
+        onTrackingStatus({
+          kind,
+          status,
+          message: status === 'lost' ? '目标人物暂时丢失' : '已锁定目标人物',
+        })
+      }
+    }
 
     const cleanup = async () => {
       video.removeEventListener('ended', finish)
@@ -127,6 +173,20 @@ async function extractPoseFrames(video, options = {}) {
           if (frames.length === 0) {
             reject(new Error(`${label}视频未检测到人体姿态，请确认人物完整入镜且光线清晰。`))
             return
+          }
+          if (lostStart !== null) {
+            lostIntervals.push({
+              startTime: lostStart,
+              endTime: video.duration || lostStart,
+            })
+          }
+          frames.tracking = {
+            trackId: tracker.trackId,
+            lostIntervals,
+            lostDurationSec: Number(lostIntervals.reduce((sum, interval) => {
+              return sum + Math.max(0, interval.endTime - interval.startTime)
+            }, 0).toFixed(2)),
+            usedManualSelection: Boolean(cropRect),
           }
           resolve(frames)
         })
@@ -153,15 +213,22 @@ async function extractPoseFrames(video, options = {}) {
         if (timestampMs > lastTimestampMs) {
           lastTimestampMs = timestampMs
           const result = landmarker.detectForVideo(video, timestampMs)
-          const frame = buildPoseFrame(result, mediaTime)
+          const tracked = tracker.select(result)
+          const frame = tracked.status === 'tracked'
+            ? buildPoseFrame(result, mediaTime, tracked.candidateIndex, tracked.trackId)
+            : null
 
           if (frame) {
+            updateTrackingStatus('tracked', mediaTime)
             frames.push(frame)
             history.push(frame)
             if (canvas) drawPoseFrame(canvas, video, frame, { color })
             if (frames.length % 30 === 0) {
               onProgress(`${label}视频已识别 ${frames.length} 帧姿态...`)
             }
+          } else {
+            updateTrackingStatus('lost', mediaTime)
+            if (canvas) clearPoseCanvas(canvas)
           }
         }
 
@@ -191,13 +258,36 @@ function createPosePlaybackRenderer(video, canvas, frames, options = {}) {
   }
 
   const color = options.color || '#b7f34a'
+  const lostIntervals = frames.tracking?.lostIntervals || []
+  const onTrackingStatus = options.onTrackingStatus || (() => {})
   let frameRequestId = null
   let disposed = false
+  let lastStatus = null
 
   const renderCurrentFrame = () => {
     if (disposed) return
+    const isLost = lostIntervals.some((interval) => {
+      return video.currentTime >= interval.startTime && video.currentTime <= interval.endTime
+    })
+    if (isLost) {
+      clearPoseCanvas(canvas)
+      if (lastStatus !== 'lost') {
+        lastStatus = 'lost'
+        onTrackingStatus('lost')
+      }
+      return
+    }
+
     const frame = findNearestPoseFrame(frames, video.currentTime || 0)
-    if (frame) drawPoseFrame(canvas, video, frame, { color })
+    if (!frame || Math.abs(frame.timestamp - video.currentTime) > 0.28) {
+      clearPoseCanvas(canvas)
+      return
+    }
+    drawPoseFrame(canvas, video, frame, { color })
+    if (lastStatus !== 'tracked') {
+      lastStatus = 'tracked'
+      onTrackingStatus('tracked')
+    }
   }
 
   const handleVideoFrame = () => {
@@ -240,11 +330,11 @@ function findNearestPoseFrame(frames, timestamp) {
     : next
 }
 
-function buildPoseFrame(result, timestamp) {
-  const landmarks = result.landmarks?.[0]
+function buildPoseFrame(result, timestamp, candidateIndex = 0, trackingId = null) {
+  const landmarks = result.landmarks?.[candidateIndex]
   if (!landmarks || landmarks.length < 33) return null
 
-  const worldLandmarks = result.worldLandmarks?.[0] || []
+  const worldLandmarks = result.worldLandmarks?.[candidateIndex] || []
   const normalizedLandmarks = landmarks.slice(0, 33).map((landmark) => ({
     x: landmark.x,
     y: landmark.y,
@@ -254,6 +344,8 @@ function buildPoseFrame(result, timestamp) {
 
   return {
     timestamp,
+    trackingId,
+    candidateIndex,
     landmarks: normalizedLandmarks,
     worldLandmarks: normalizedLandmarks.map((_, index) => {
       const landmark = worldLandmarks[index]

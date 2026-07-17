@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>DanceMirror - AI舞蹈视频比对</title>
+    <link rel="icon" href="data:," />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -80,7 +81,48 @@
           </div>
         </div>
 
-        <div class="timeline-row hidden" id="timelineRow" aria-label="AI 检测到的不匹配片段"></div>
+        <section class="sync-controls hidden" id="syncControls" aria-label="双视频公共播放控制">
+          <div class="sync-toolbar">
+            <button class="sync-play" type="button" id="syncPlay" aria-label="播放双视频">播放</button>
+            <button type="button" id="frameBack" aria-label="后退一帧">−1 帧</button>
+            <button type="button" id="frameForward" aria-label="前进一帧">+1 帧</button>
+            <label class="speed-control">
+              <span>速度</span>
+              <select id="playbackRate">
+                <option value="0.5">0.5×</option>
+                <option value="0.75">0.75×</option>
+                <option value="1" selected>1×</option>
+                <option value="1.25">1.25×</option>
+              </select>
+            </label>
+            <button type="button" id="loopSegment" aria-pressed="false">循环 4 秒</button>
+          </div>
+          <div class="common-timeline">
+            <input id="commonProgress" type="range" min="0" max="0" value="0" step="0.01" aria-label="公共进度条" />
+            <div class="timeline-markers" id="timelineMarkers" aria-hidden="true"></div>
+          </div>
+          <div class="timeline-meta">
+            <output id="commonTime">00:00.00 / 00:00.00</output>
+            <output id="syncAccuracy">同步待校准</output>
+          </div>
+          <div class="manual-sync-tools">
+            <span>手动微调用户视频</span>
+            <button type="button" id="nudgeEarlier">提前 0.05s</button>
+            <button type="button" id="nudgeLater">延后 0.05s</button>
+          </div>
+        </section>
+
+        <section class="coach-panel" aria-labelledby="coach-panel-title">
+          <div class="coach-panel-head">
+            <div>
+              <span class="section-kicker">AI Coach</span>
+              <h3 id="coach-panel-title">AI 教练建议</h3>
+            </div>
+            <output id="currentAdviceTime">等待分析</output>
+          </div>
+          <p class="coach-empty" id="coachEmpty">完成音轨校准与动作分析后，建议会按公共时间轴显示在这里。</p>
+          <div class="issue-list hidden" id="issueList"></div>
+        </section>
       </section>
 
       <section class="control-sheet" aria-labelledby="config-title">
@@ -95,7 +137,7 @@
           系统会先对齐两段音轨，再用 MediaPipe 逐帧提取 33 个身体关键点，计算姿态、幅度、节奏和控制差异。
         </p>
 
-        <button class="primary-action" id="analyzeButton">开始逐帧比对</button>
+        <button class="primary-action" id="analyzeButton" disabled>请先完成音轨校准</button>
         <p class="form-message" id="formMessage" role="status"></p>
       </section>
 
@@ -107,6 +149,14 @@
             <p id="analysisStage">正在提取老师逐帧姿态...</p>
           </div>
         </div>
+        <ol class="analysis-steps" id="analysisSteps">
+          <li data-analysis-step="audio">正在提取音频</li>
+          <li data-analysis-step="calibration">正在校准视频</li>
+          <li data-analysis-step="pose">正在提取人体姿态</li>
+          <li data-analysis-step="compare">正在对比动作</li>
+          <li data-analysis-step="coach">正在生成舞蹈建议</li>
+          <li data-analysis-step="complete">等待完成</li>
+        </ol>
       </section>
 
       <section class="report hidden" id="report" aria-labelledby="report-title">
@@ -115,14 +165,6 @@
           <h2 id="report-title">本次比对总结</h2>
           <p id="coachNote"></p>
           <div class="score-grid" id="scoreGrid" aria-label="姿态分析评分"></div>
-        </div>
-
-        <div class="report-section">
-          <div class="section-heading">
-            <span class="section-kicker">Mismatch Detected</span>
-            <h2>自动检测到的不匹配</h2>
-          </div>
-          <div class="issue-list" id="issueList"></div>
         </div>
 
         <div class="report-section split">
@@ -144,10 +186,11 @@
       </section>
 
       <div class="crop-overlay hidden" id="cropOverlay">
-        <div class="crop-hint">在视频中框选你自己</div>
+        <div class="crop-hint" id="cropHint">框选需要持续跟踪的人物</div>
         <canvas id="cropCanvas"></canvas>
         <div class="crop-actions">
           <button class="crop-cancel" type="button" id="cropCancel">取消</button>
+          <button class="crop-clear" type="button" id="cropClear">清除框选</button>
           <button class="crop-confirm" type="button" id="cropConfirm">确认框选</button>
         </div>
       </div>
@@ -170,7 +213,7 @@
             <span>API Key</span>
             <input id="apiKey" type="password" placeholder="填入你的 API Key" />
           </label>
-          <p class="settings-hint">支持 Gemini API（免费注册：<a href="https://aistudio.google.com" target="_blank" rel="noopener">Google AI Studio</a>）。不填 Key 则使用 Mock 数据。</p>
+          <p class="settings-hint">支持 Gemini API（免费注册：<a href="https://aistudio.google.com" target="_blank" rel="noopener">Google AI Studio</a>）。不填 Key 仍会使用浏览器本地姿态分析和教练建议。</p>
           <button class="primary-action" type="button" id="settingsSave">保存设置</button>
         </div>
       </div>

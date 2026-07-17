@@ -1,39 +1,51 @@
 const ISSUE_COPY = {
   timing_delay: {
-    title: (issue) => `${issue.bodyPartLabel}启动慢了一点`,
-    teacherPath: (issue) => `老师在这个拍点已经完成 ${issue.bodyPartLabel} 的主要动作，身体节奏先到位再进入下一拍。`,
-    userPath: (issue) => `你的 ${issue.bodyPartLabel} 比老师晚约 ${Math.abs(issue.delayMs)}ms，动作看起来会像是被上一拍拖住。`,
-    advice: (issue) => `只练这一拍的预备动作，先用 0.5 倍速提前半拍启动 ${issue.bodyPartLabel}，连续 6 次后再跟音乐。`,
+    title: (issue) => `${issue.bodyPartLabel}慢了一点`,
+    positive: (issue) => `你的动作方向已经跟上老师，${issue.bodyPartLabel}的路线也基本正确。`,
+    performance: (issue) => `这一拍 ${issue.bodyPartLabel} 的启动稍微晚了一点，动作到位后留给下一拍的空间不够。`,
+    impact: () => '连续动作会像被上一拍轻轻拖住，卡点的利落感会变弱。',
+    practice: (issue) => `先用 0.75 倍速只练这一拍，提前准备 ${issue.bodyPartLabel}，听到重拍时刚好到位，连续做 6 次。`,
+    encouragement: () => '你的动作路线是对的，把启动时机再稳一点就会更有质感。',
   },
   timing_early: {
-    title: (issue) => `${issue.bodyPartLabel}有抢拍倾向`,
-    teacherPath: (issue) => `老师在重拍到来时才把 ${issue.bodyPartLabel} 推到动作终点，节奏停顿更清楚。`,
-    userPath: (issue) => `你的 ${issue.bodyPartLabel} 提前约 ${Math.abs(issue.delayMs)}ms 到位，后半拍会显得没有停顿。`,
-    advice: (issue) => `跟节拍器慢练，数到重拍再完成 ${issue.bodyPartLabel}，不要把终点提前交出去。`,
+    title: (issue) => `${issue.bodyPartLabel}有一点抢拍`,
+    positive: (issue) => `你的 ${issue.bodyPartLabel} 到位方向很清楚，动作也敢于做出来。`,
+    performance: (issue) => `这一拍 ${issue.bodyPartLabel} 稍微早了一些，所以到位后没有把停顿完整留住。`,
+    impact: () => '重拍前就把动作交出去，会让后半拍显得松，停顿不够干净。',
+    practice: (issue) => `用 0.75 倍速练“准备—到位—停住”，数到重拍再完成 ${issue.bodyPartLabel}，每次停一拍。`,
+    encouragement: () => '你的动作方向已经正确，把节奏控制住就会更稳、更有层次。',
   },
   insufficient_amplitude: {
-    title: (issue) => `${issue.bodyPartLabel}动作幅度偏小`,
-    teacherPath: (issue) => `老师的 ${issue.bodyPartLabel} 运动范围更完整，起点、延伸和收回都有清楚的层次。`,
-    userPath: (issue) => `你的 ${issue.bodyPartLabel} 幅度约为老师的 ${Math.round(issue.ratio * 100)}%，动作线条会显得短。`,
-    advice: (issue) => `先不追速度，把 ${issue.bodyPartLabel} 的起点和终点单独定住 2 秒，再用 0.75 倍速串起来。`,
+    title: (issue) => `${issue.bodyPartLabel}延伸还可以更完整`,
+    positive: (issue) => `你的 ${issue.bodyPartLabel} 起点和方向都能看出来，动作框架已经建立起来了。`,
+    performance: (issue) => `这一段 ${issue.bodyPartLabel} 在到达终点前稍早收回，动作延伸还没有完全送出去。`,
+    impact: () => '动作线条会显得偏短，力量没有完整传到最远端。',
+    practice: (issue) => `先不追速度，把 ${issue.bodyPartLabel} 的起点和终点各停住一拍，再用 0.75 倍速连起来，重复 6 次。`,
+    encouragement: () => '你的方向感不错，只要把终点再送远一点，画面会立刻更舒展。',
   },
   end_position_jitter: {
-    title: () => 'Ending 定格不够稳',
-    teacherPath: () => '老师在结束拍把重心和髋部收住，定格后没有多余回弹。',
-    userPath: () => '你的髋部在最后几帧还有轻微晃动，收尾看起来不够干净。',
-    advice: () => '最后 4 拍单独练 5 次，每次定格后默数 2 秒，再放松身体。',
+    title: () => 'Ending 停顿不够干净',
+    positive: () => '你已经把 Ending 的主要方向做出来了，收尾动作是完整的。',
+    performance: () => '最后一拍到位后，重心还有一点回弹，没有完全停住。',
+    impact: () => 'Ending 的轮廓会显得松，前面累积的力量没有在最后一拍收住。',
+    practice: () => '单独练最后 4 拍，每次到位后默数两拍再放松，连续做 5 次。',
+    encouragement: () => '你已经有清楚的收尾方向，把最后一下稳住就会很出片。',
   },
   torso_instability: {
-    title: () => '躯干控制需要更稳定',
-    teacherPath: () => '老师的躯干角度变化更集中，发力从核心向四肢传出去。',
-    userPath: () => '你的躯干有额外摆动，手脚到位时核心没有完全收住。',
-    advice: () => '先去掉手臂，只练胸腔和髋部的方向，确认核心稳定后再叠加手臂。',
+    title: () => '中段控制还可以更稳',
+    positive: () => '你的四肢动作已经能跟上，主要动作轮廓是清楚的。',
+    performance: () => '手脚到位时，胸腔和髋部之间还有额外晃动，核心没有完全把力量接住。',
+    impact: () => '力量传递会显得散，动作线条不够集中。',
+    practice: () => '先去掉手臂，只练胸腔和髋部的方向转换；中段能稳住后，再把手臂叠回来。',
+    encouragement: () => '你的动作框架已经在了，把中段控制补上会更有力量。',
   },
   pose_similarity_gap: {
-    title: () => '整体姿态角度和老师不够贴合',
-    teacherPath: () => '老师在关键帧里肩、髋、膝的角度衔接更一致，动作轮廓更清楚。',
-    userPath: () => '你的关节角度和老师有差距，主要影响动作线条的干净程度。',
-    advice: () => '暂停在这一帧，对镜只修肩、髋、膝三个角度，确认轮廓贴近后再恢复速度。',
+    title: () => '关键动作轮廓还不够贴合',
+    positive: () => '你的主要方向和老师一致，整段动作没有跑偏。',
+    performance: () => '这一处肩、髋和膝的配合还没有同时到位，动作轮廓略显松散。',
+    impact: () => '关键帧不够清楚，会让动作质感和老师看起来有差距。',
+    practice: () => '暂停在这一处，先只对齐肩、髋、膝三个位置；能稳定停住后，再恢复到 0.75 倍速。',
+    encouragement: () => '你的大方向是对的，把这个关键帧磨清楚，整段会马上更像。',
   },
 }
 
@@ -42,10 +54,10 @@ function generateFeedbackFromAnalysis(analysis, cropInfo = null) {
   const mismatches = issues.map((issue) => issueToMismatch(issue))
   const primary = mismatches[0]
 
-  return {
+  return normalizeCoachingReport({
     id: `pose_${Date.now()}`,
     createdAt: new Date().toISOString(),
-    title: `${primary.title}，综合得分 ${analysis.overallScore}`,
+    title: primary.title,
     aiSummary: buildSummary(analysis),
     mismatches,
     drillPlan: {
@@ -62,26 +74,32 @@ function generateFeedbackFromAnalysis(analysis, cropInfo = null) {
     },
     structuredAnalysis: buildStructuredAnalysisForModel(analysis),
     safetyNote: '以上建议仅用于舞蹈训练参考，如出现疼痛或不适请停止练习。',
-  }
+  })
 }
 
 function buildStructuredAnalysisForModel(analysis) {
   return {
-    overallScore: analysis.overallScore,
-    poseSimilarity: analysis.poseSimilarity,
-    timingScore: analysis.timingScore,
-    amplitudeScore: analysis.amplitudeScore,
-    controlScore: analysis.controlScore,
-    mirroredUserVideo: analysis.mirroredUserVideo,
-    audioAlignment: analysis.audioAlignment,
-    alignedFramePairs: analysis.alignedFramePairs,
+    comparisonSummary: {
+      strongestDimension: strongestScore(analysis).key,
+      weakestDimension: weakestScore(analysis).key,
+      mirroredUserVideo: analysis.mirroredUserVideo,
+      timelineDurationSec: analysis.audioAlignment?.overlapDurationSec || 0,
+      trackingQuality: {
+        teacherLostDurationSec: analysis.tracking?.teacher?.lostDurationSec || 0,
+        userLostDurationSec: analysis.tracking?.user?.lostDurationSec || 0,
+      },
+    },
     issues: analysis.issues.map((issue) => ({
       type: issue.type,
       bodyPart: issue.bodyPart,
-      delayMs: issue.delayMs,
-      ratio: issue.ratio,
+      bodyPartLabel: issue.bodyPartLabel,
       severity: issue.severity,
-      timestamp: formatTimestamp(issue.teacherTimestamp ?? 0),
+      startTime: issue.startTime,
+      endTime: issue.endTime,
+      timingDirection: issue.type === 'timing_delay'
+        ? 'slightly_late'
+        : issue.type === 'timing_early' ? 'slightly_early' : null,
+      amplitudeBand: issue.type === 'insufficient_amplitude' ? 'shorter_than_reference' : null,
     })),
   }
 }
@@ -89,12 +107,9 @@ function buildStructuredAnalysisForModel(analysis) {
 function buildSummary(analysis) {
   const strongest = strongestScore(analysis)
   const weakest = weakestScore(analysis)
-  const mirrorNote = analysis.mirroredUserVideo ? '系统已按镜像视频自动校正左右方向。' : ''
+  const mirrorNote = analysis.mirroredUserVideo ? '左右方向已经按镜像画面做了校正。' : ''
 
-  const offset = Number(analysis.audioAlignment?.offsetSec) || 0
-  const audioNote = `系统先按音轨校正了 ${Math.abs(offset).toFixed(2)} 秒的剪辑偏移，再进行姿态和 DTW 对齐。`
-
-  return `这次比对使用 MediaPipe 逐帧提取全部 33 个关键点。${audioNote}${mirrorNote} ${strongest.label}相对最好，${weakest.label}是下一轮最值得优先修的部分。`
+  return `这一遍的动作方向整体是清楚的，${strongest.label}表现相对最好。下一轮先把${weakest.label}这一项练稳，不用同时修改太多细节。${mirrorNote}`
 }
 
 function strongestScore(analysis) {
@@ -107,33 +122,96 @@ function weakestScore(analysis) {
 
 function scoreEntries(analysis) {
   return [
-    { label: '姿态相似度', value: analysis.poseSimilarity },
-    { label: '节奏准确度', value: analysis.timingScore },
-    { label: '动作幅度', value: analysis.amplitudeScore },
-    { label: '稳定与控制', value: analysis.controlScore },
+    { key: 'pose', label: '关键动作轮廓', value: analysis.poseSimilarity },
+    { key: 'timing', label: '节奏控制', value: analysis.timingScore },
+    { key: 'amplitude', label: '动作延伸', value: analysis.amplitudeScore },
+    { key: 'control', label: '稳定与控制', value: analysis.controlScore },
   ]
 }
 
 function issueToMismatch(issue) {
   const copy = ISSUE_COPY[issue.type] || ISSUE_COPY.pose_similarity_gap
+  const startTime = Number(issue.startTime) || Math.max(0, (issue.teacherTimestamp || 0) - 0.8)
+  const endTime = Math.max(startTime + 0.4, Number(issue.endTime) || startTime + 2)
+
+  return buildCompatibleMismatch({
+    startTime,
+    endTime,
+    title: copy.title(issue),
+    positive: copy.positive(issue),
+    performance: copy.performance(issue),
+    impact: copy.impact(issue),
+    practice: copy.practice(issue),
+    encouragement: copy.encouragement(issue),
+    priority: issue.severity === 'high' ? 'high' : 'medium',
+  })
+}
+
+function normalizeCoachingReport(report, fallbackReport = null) {
+  const fallbackIssues = fallbackReport?.mismatches || []
+  const reportIssues = Array.isArray(report?.mismatches) && report.mismatches.length > 0
+    ? report.mismatches
+    : fallbackIssues
+  const mismatches = reportIssues.map((issue, index) => {
+    const fallback = fallbackIssues[index] || {}
+    const startTime = numberFromTime(
+      issue.startTime ?? fallback.startTime ?? issue.timestamp ?? fallback.timestamp,
+    )
+    const endTime = Math.max(
+      startTime + 0.4,
+      numberFromTime(issue.endTime ?? fallback.endTime ?? startTime + 2),
+    )
+
+    return buildCompatibleMismatch({
+      ...fallback,
+      ...issue,
+      startTime,
+      endTime,
+      title: issue.title || fallback.title || '这一段需要再稳一点',
+      positive: issue.positive || issue.teacherPath || fallback.positive || fallback.teacherPath || '这一段的动作方向已经基本正确。',
+      performance: issue.performance || issue.userPath || fallback.performance || fallback.userPath || '主要动作已经完成，但细节还可以更清楚。',
+      impact: issue.impact || fallback.impact || '这个细节会影响动作的干净程度。',
+      practice: issue.practice || issue.advice || fallback.practice || fallback.advice || '先用 0.75 倍速重复这一小段。',
+      encouragement: issue.encouragement || fallback.encouragement || '保持现在的方向，慢一点练会更稳。',
+    })
+  })
 
   return {
-    timestamp: formatTimestamp(issue.teacherTimestamp ?? 0),
-    title: copy.title(issue),
-    teacherPath: copy.teacherPath(issue),
-    userPath: copy.userPath(issue),
-    advice: copy.advice(issue),
-    priority: issue.severity === 'high' ? 'high' : 'medium',
+    ...fallbackReport,
+    ...report,
+    mismatches,
+  }
+}
+
+function buildCompatibleMismatch(issue) {
+  const startTime = Math.max(0, Number(issue.startTime) || 0)
+  const endTime = Math.max(startTime + 0.4, Number(issue.endTime) || startTime + 2)
+  return {
+    ...issue,
+    startTime: Number(startTime.toFixed(2)),
+    endTime: Number(endTime.toFixed(2)),
+    timestamp: formatTimestamp(startTime),
+    positive: issue.positive,
+    performance: issue.performance,
+    impact: issue.impact,
+    practice: issue.practice,
+    encouragement: issue.encouragement,
+    teacherPath: issue.positive,
+    userPath: issue.performance,
+    advice: issue.practice,
   }
 }
 
 function buildDefaultIssue(analysis) {
+  const timestamp = analysis.alignedFramePairs[Math.floor(analysis.alignedFramePairs.length / 2)]?.teacherTimestamp ?? 0
   return {
     type: 'pose_similarity_gap',
     bodyPart: 'torso',
     bodyPartLabel: '躯干',
     severity: analysis.poseSimilarity >= 82 ? 'low' : 'medium',
-    teacherTimestamp: analysis.alignedFramePairs[Math.floor(analysis.alignedFramePairs.length / 2)]?.teacherTimestamp ?? 0,
+    teacherTimestamp: timestamp,
+    startTime: Math.max(0, timestamp - 0.8),
+    endTime: timestamp + 1.2,
   }
 }
 
@@ -142,35 +220,48 @@ function buildDrillSteps(issues) {
 
   if (first?.type === 'timing_delay' || first?.type === 'timing_early') {
     return [
-      `3 分钟：只数拍子，不加手脚，确认 ${first.bodyPartLabel} 的启动点。`,
-      `6 分钟：0.5 倍速练 ${first.bodyPartLabel} 的预备和到位，避免提前或滞后。`,
-      '6 分钟：恢复 0.75 倍速录一遍，重点看重拍瞬间是否同时到位。',
+      `3 分钟：只数拍子，确认 ${first.bodyPartLabel} 的准备和到位时机。`,
+      `6 分钟：0.75 倍速练 ${first.bodyPartLabel} 的“准备—到位—停住”。`,
+      '6 分钟：跟音乐录一遍，只检查重拍瞬间是否刚好到位。',
     ]
   }
 
   if (first?.type === 'insufficient_amplitude') {
     return [
       `3 分钟：定住 ${first.bodyPartLabel} 的动作起点和终点。`,
-      `6 分钟：慢速把 ${first.bodyPartLabel} 的路径做完整，不急着跟音乐。`,
-      '6 分钟：把同一小节连起来，保持幅度但减少多余晃动。',
+      `6 分钟：慢速把 ${first.bodyPartLabel} 的路径送完整。`,
+      '6 分钟：把同一小节连起来，保持延伸同时减少多余晃动。',
     ]
   }
 
   return [
-    '3 分钟：暂停在问题最明显的时间点，只观察身体轮廓和老师的差异。',
-    '6 分钟：0.5 倍速重复同一小节，让肩、髋、膝的角度逐步贴近老师。',
-    '6 分钟：恢复 0.75 倍速录一遍，检查 Ending 是否能停稳 2 秒。',
+    '3 分钟：暂停在当前建议片段，只观察身体轮廓。',
+    '6 分钟：0.75 倍速重复同一小节，先把关键动作停清楚。',
+    '6 分钟：恢复原速录一遍，检查动作到位后能否稳住。',
   ]
 }
 
 function buildReviewAdvice(analysis, cropInfo) {
+  const lostDuration = (analysis.tracking?.teacher?.lostDurationSec || 0)
+    + (analysis.tracking?.user?.lostDurationSec || 0)
+  const trackingNote = lostDuration > 0
+    ? '分析中有短暂遮挡；丢失期间没有改跟其他人，建议优先复看骨架连续的片段。'
+    : '两段视频的目标人物跟踪保持连续，可以直接按时间节点复看。'
+
   return [
-    '先看分数最低的维度，不要同时修节奏、幅度和表情。',
-    `本次已完成 ${analysis.alignedFramePairs.length} 组动作对齐，可优先点击时间点回看差异最大的片段。`,
+    '先练当前高亮的建议，每次只修一个主要问题。',
+    trackingNote,
     cropInfo
-      ? '这次已框选本人区域；下一次保持相同机位，方便比较进步。'
-      : '多人或背景复杂时，先用「框选自己」让姿态识别更稳定。',
+      ? '这次已按框选人物完成跟踪；下次保持相近机位，更容易比较变化。'
+      : '多人或背景复杂时，先分别框选老师和自己，能减少跟错人的风险。',
   ]
+}
+
+function numberFromTime(value) {
+  if (Number.isFinite(Number(value))) return Math.max(0, Number(value))
+  const parts = String(value || '').split(':').map((part) => Number(part))
+  if (parts.length !== 2 || parts.some((part) => !Number.isFinite(part))) return 0
+  return Math.max(0, parts[0] * 60 + parts[1])
 }
 
 function formatTimestamp(seconds) {
@@ -181,7 +272,8 @@ function formatTimestamp(seconds) {
 }
 
 export {
-  generateFeedbackFromAnalysis,
   buildStructuredAnalysisForModel,
   formatTimestamp,
+  generateFeedbackFromAnalysis,
+  normalizeCoachingReport,
 }

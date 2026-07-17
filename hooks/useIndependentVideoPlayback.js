@@ -18,8 +18,6 @@ function createIndependentVideoPlayback({
   let alignment = null
   let playbackRate = 1
   let isPlaying = false
-  let loopEnabled = false
-  let loopRange = null
   let frameRequestId = null
   let cleanupFns = []
 
@@ -91,7 +89,7 @@ function createIndependentVideoPlayback({
     syncUserToTeacher(true)
     applyPlaybackRates()
     isPlaying = true
-    onPlaybackChange({ isPlaying, loopEnabled, playbackRate })
+    onPlaybackChange({ isPlaying, playbackRate })
     startMonitor()
 
     const results = await Promise.allSettled([teacher.play(), user.play()])
@@ -112,7 +110,7 @@ function createIndependentVideoPlayback({
     stopMonitor()
     if (isPlaying) {
       isPlaying = false
-      onPlaybackChange({ isPlaying, loopEnabled, playbackRate })
+      onPlaybackChange({ isPlaying, playbackRate })
     }
     publishTime()
   }
@@ -139,18 +137,7 @@ function createIndependentVideoPlayback({
   function setPlaybackRate(nextRate) {
     playbackRate = clamp(Number(nextRate) || 1, 0.25, 2)
     applyPlaybackRates()
-    onPlaybackChange({ isPlaying, loopEnabled, playbackRate })
-  }
-
-  function setLoop(enabled, centerTime = getCommonTime(), durationSec = 4) {
-    loopEnabled = Boolean(enabled)
-    const duration = getDuration()
-    const safeDuration = Math.min(duration, Math.max(1, durationSec))
-    const start = clamp(centerTime - safeDuration / 2, 0, Math.max(0, duration - safeDuration))
-    loopRange = loopEnabled
-      ? { start, end: Math.min(duration, start + safeDuration) }
-      : null
-    onPlaybackChange({ isPlaying, loopEnabled, playbackRate, loopRange })
+    onPlaybackChange({ isPlaying, playbackRate })
   }
 
   function syncUserToTeacher(force = false) {
@@ -207,9 +194,7 @@ function createIndependentVideoPlayback({
       if (!isPlaying) return
 
       const commonTime = getCommonTime()
-      if (loopEnabled && loopRange && commonTime >= loopRange.end) {
-        seekCommon(loopRange.start)
-      } else if (commonTime >= getDuration() - 0.015) {
+      if (commonTime >= getDuration() - 0.015) {
         pauseAll()
         seekCommon(getDuration())
         return
@@ -274,7 +259,6 @@ function createIndependentVideoPlayback({
     stepFrame,
     seekCommon,
     setPlaybackRate,
-    setLoop,
     destroy,
   }
 }

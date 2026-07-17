@@ -100,7 +100,6 @@ const elements = {
   stepBack: document.querySelector('#stepBack'),
   stepForward: document.querySelector('#stepForward'),
   playbackRate: document.querySelector('#playbackRate'),
-  loopSegment: document.querySelector('#loopSegment'),
   startAnalysis: document.querySelector('#startAnalysis'),
   reselectSubject: document.querySelector('#reselectSubject'),
   analysisStepper: document.querySelector('#analysisStepper'),
@@ -143,12 +142,10 @@ const videoPlayback = createIndependentVideoPlayback({
   teacherVideoRef,
   userVideoRef,
   onTimeUpdate: ({ commonTime }) => updateCommonTime(commonTime),
-  onPlaybackChange: ({ isPlaying, loopEnabled }) => {
+  onPlaybackChange: ({ isPlaying }) => {
     state.isPlaying = isPlaying
     elements.sharedPlay.textContent = isPlaying ? 'Ⅱ' : '▶'
     elements.sharedPlay.setAttribute('aria-label', isPlaying ? '暂停双视频' : '播放双视频')
-    elements.loopSegment.classList.toggle('active', loopEnabled)
-    elements.loopSegment.setAttribute('aria-pressed', String(loopEnabled))
   },
 })
 
@@ -198,7 +195,8 @@ function renderUploadCard(role) {
   const demoPose = preview.querySelector('[data-demo-pose]')
   const fieldMessage = card.querySelector('.field-message')
 
-  status.textContent = asset ? '已添加' : '未添加'
+  status.textContent = asset ? '✓ 上传成功' : '未添加'
+  card.classList.toggle('is-uploaded', Boolean(asset))
   card.classList.remove('has-error')
   dropzone.classList.toggle('hidden', Boolean(asset))
   preview.classList.toggle('hidden', !asset)
@@ -761,13 +759,12 @@ function renderTimeline() {
   const mismatches = state.report?.mismatches || []
   const markers = mismatches.map((item, index) => {
     const left = clamp((item.startTime / duration) * 100, 0, 100)
-    const width = Math.max(1.5, ((item.endTime - item.startTime) / duration) * 100)
-    return `<button class="timeline-marker ${item.severity} ${index === state.activeMismatchIndex ? 'active' : ''}" style="left:${left}%;width:${width}%" type="button" data-marker-index="${index}" aria-label="跳到 ${escapeHtml(item.timestamp)}：${escapeHtml(item.title)}"></button>`
+    return `<button class="difference-marker ${index === state.activeMismatchIndex ? 'active' : ''}" style="left:${left}%" type="button" data-marker-index="${index}" aria-label="跳到 ${escapeHtml(item.timestamp)}：${escapeHtml(item.title)}"></button>`
   })
   const gaps = (state.report?.trackingGaps || []).map((gap) => {
     const left = clamp((gap.startTime / duration) * 100, 0, 100)
     const width = Math.max(1.5, ((gap.endTime - gap.startTime) / duration) * 100)
-    return `<span class="timeline-gap" style="left:${left}%;width:${width}%" title="${escapeHtml(gap.message)}"></span>`
+    return `<span class="tracking-marker" style="left:${left}%;width:${width}%" title="${escapeHtml(gap.message)}"></span>`
   })
   elements.timelineOverlay.innerHTML = markers.concat(gaps).join('')
 }
@@ -796,11 +793,7 @@ function startDemoPlayback() {
     const elapsed = ((now - lastTime) / 1000) * Number(elements.playbackRate.value)
     lastTime = now
     const duration = getComparisonDuration()
-    let nextTime = state.commonTime + elapsed
-    if (elements.loopSegment.getAttribute('aria-pressed') === 'true') {
-      const { start, end } = getLoopRange()
-      if (nextTime >= end) nextTime = start
-    }
+    const nextTime = state.commonTime + elapsed
     if (nextTime >= duration) {
       updateCommonTime(duration)
       stopDemoPlayback()
@@ -851,21 +844,6 @@ function updateCommonTime(commonTime, { skipIssueRender = false } = {}) {
       pose.innerHTML = poseFigure(pose.dataset.demoWorkspace, Math.floor(state.commonTime / 4) % 3)
     })
   }
-}
-
-function toggleLoop() {
-  const enabled = elements.loopSegment.getAttribute('aria-pressed') !== 'true'
-  elements.loopSegment.setAttribute('aria-pressed', String(enabled))
-  elements.loopSegment.classList.toggle('active', enabled)
-  if (state.videos.teacher?.source !== 'demo') videoPlayback.setLoop(enabled, state.commonTime, 4)
-}
-
-function getLoopRange() {
-  const issue = state.report?.mismatches?.[state.activeMismatchIndex]
-  if (issue) return { start: issue.startTime, end: issue.endTime }
-  const duration = getComparisonDuration()
-  const start = clamp(state.commonTime - 2, 0, Math.max(0, duration - 4))
-  return { start, end: Math.min(duration, start + 4) }
 }
 
 async function startAnalysis() {
@@ -1254,7 +1232,6 @@ function bindEvents() {
   elements.stepBack.addEventListener('click', () => seekCommonTime(state.commonTime - 1 / 30))
   elements.stepForward.addEventListener('click', () => seekCommonTime(state.commonTime + 1 / 30))
   elements.playbackRate.addEventListener('change', (event) => videoPlayback.setPlaybackRate(event.target.value))
-  elements.loopSegment.addEventListener('click', toggleLoop)
   elements.timelineOverlay.addEventListener('click', (event) => {
     const marker = event.target.closest('[data-marker-index]')
     if (marker) jumpToIssue(Number(marker.dataset.markerIndex))
@@ -1276,8 +1253,8 @@ function bindEvents() {
   })
   elements.deleteFromReport.addEventListener('click', requestDeleteData)
   elements.retryFromError.addEventListener('click', startProcessing)
-  elements.privacyOpen.addEventListener('click', openPrivacy)
-  elements.footerPrivacy.addEventListener('click', openPrivacy)
+  elements.privacyOpen?.addEventListener('click', openPrivacy)
+  elements.footerPrivacy?.addEventListener('click', openPrivacy)
   elements.privacyClose.addEventListener('click', closePrivacy)
   elements.privacyDone.addEventListener('click', closePrivacy)
   elements.privacyBackdrop.addEventListener('click', (event) => {
@@ -1332,6 +1309,7 @@ function initialize() {
   })
   elements.reviewToolbar.classList.toggle('hidden', !REVIEW_MODE)
   setStage('upload', { focus: false })
+  if (REVIEW_MODE) loadDemoAssets()
 }
 
 initialize()

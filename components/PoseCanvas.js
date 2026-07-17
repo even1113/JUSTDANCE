@@ -73,25 +73,38 @@ function syncPoseCanvasSize(canvas) {
 }
 
 function getVideoContentRect(canvas, video) {
-  const canvasRatio = canvas.width / canvas.height
-  const videoRatio = (video.videoWidth || canvas.width) / (video.videoHeight || canvas.height)
+  return getContainedContentRect(
+    canvas.width,
+    canvas.height,
+    video.videoWidth || canvas.width,
+    video.videoHeight || canvas.height,
+  )
+}
 
-  if (videoRatio > canvasRatio) {
-    const height = canvas.width / videoRatio
+function getContainedContentRect(containerWidth, containerHeight, contentWidth, contentHeight) {
+  const safeContainerWidth = Math.max(1, Number(containerWidth) || 1)
+  const safeContainerHeight = Math.max(1, Number(containerHeight) || 1)
+  const safeContentWidth = Math.max(1, Number(contentWidth) || 1)
+  const safeContentHeight = Math.max(1, Number(contentHeight) || 1)
+  const containerRatio = safeContainerWidth / safeContainerHeight
+  const contentRatio = safeContentWidth / safeContentHeight
+
+  if (contentRatio > containerRatio) {
+    const height = safeContainerWidth / contentRatio
     return {
       x: 0,
-      y: (canvas.height - height) / 2,
-      width: canvas.width,
+      y: (safeContainerHeight - height) / 2,
+      width: safeContainerWidth,
       height,
     }
   }
 
-  const width = canvas.height * videoRatio
+  const width = safeContainerHeight * contentRatio
   return {
-    x: (canvas.width - width) / 2,
+    x: (safeContainerWidth - width) / 2,
     y: 0,
     width,
-    height: canvas.height,
+    height: safeContainerHeight,
   }
 }
 
@@ -168,5 +181,7 @@ export {
   POSE_CONNECTIONS,
   drawPoseFrame,
   clearPoseCanvas,
+  getContainedContentRect,
+  getVideoContentRect,
   syncPoseCanvasSize,
 }

@@ -16,6 +16,7 @@ function getVisionFileset() {
 
 async function createPoseLandmarker(options = {}) {
   const vision = await getVisionFileset()
+  const numPoses = Math.max(1, Math.min(6, Number(options.numPoses) || 4))
   const baseOptions = {
     modelAssetPath: options.modelAssetPath || POSE_MODEL_URL,
     delegate: options.delegate || 'GPU',
@@ -25,7 +26,7 @@ async function createPoseLandmarker(options = {}) {
     return await PoseLandmarker.createFromOptions(vision, {
       baseOptions,
       runningMode: 'VIDEO',
-      numPoses: 1,
+      numPoses,
       minPoseDetectionConfidence: 0.5,
       minPosePresenceConfidence: 0.5,
       minTrackingConfidence: 0.5,
@@ -39,7 +40,7 @@ async function createPoseLandmarker(options = {}) {
         delegate: 'CPU',
       },
       runningMode: 'VIDEO',
-      numPoses: 1,
+      numPoses,
       minPoseDetectionConfidence: 0.5,
       minPosePresenceConfidence: 0.5,
       minTrackingConfidence: 0.5,

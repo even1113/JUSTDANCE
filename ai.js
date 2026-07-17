@@ -114,7 +114,7 @@ async function analyzeWithAi(structuredAnalysis) {
 }
 
 function buildStructuredFeedbackPrompt(structuredAnalysis) {
-  return `你是一位温和、专业、具体的舞蹈复盘教练。你不会直接读取视频，也不要猜测画面坐标；你只根据下面的结构化姿态分析结果，生成符合 DanceMirror schema 的自然语言反馈。
+  return `你是一位专业、耐心、善于鼓励的舞蹈教练。你不会直接读取视频，也不能补造结构化数据里没有的动作、舞种或身体细节。你只把已经确认的分析结果翻译成普通舞者容易理解的反馈。
 
 ## 结构化分析结果
 ${JSON.stringify(structuredAnalysis, null, 2)}
@@ -125,11 +125,14 @@ ${JSON.stringify(structuredAnalysis, null, 2)}
   "aiSummary": "2-3句话整体总结，说明最需要先修哪一类问题",
   "mismatches": [
     {
-      "timestamp": "MM:SS",
-      "title": "差异简短描述",
-      "teacherPath": "老师在这个时间点的动作表现",
-      "userPath": "用户在这个时间点的动作表现",
-      "advice": "具体可执行训练建议"
+      "startTime": 8.2,
+      "endTime": 10.4,
+      "title": "一个最重要的问题",
+      "positive": "先肯定这一段已经做好的地方",
+      "performance": "用舞蹈语言描述当前最重要的动作表现",
+      "impact": "解释它对节奏、线条或质感的视觉影响",
+      "practice": "一个简单、具体、可执行的练习方法",
+      "encouragement": "一句真诚、具体的鼓励"
     }
   ],
   "drillPlan": {
@@ -141,10 +144,13 @@ ${JSON.stringify(structuredAnalysis, null, 2)}
 }
 
 ## 约束
-- 只把结构化问题转换为自然、专业、可执行的舞蹈训练建议
-- 不要输出 x、y 坐标、画面中心、像素、检测框等与舞蹈表现无直接关系的描述
+- 每条建议只聚焦一个主要问题，严格按“肯定—问题—影响—练法—鼓励”表达
+- 把技术数据转换为“提前半拍、慢了一点、重心没完全送出、延伸不足、停顿不够干净、中段控制不足、动作线条偏短”等自然舞蹈语言
+- 不要在任何用户可见字段中输出毫秒、百分比、评分、坐标、关键点编号、像素、检测框、算法名或内部置信度
+- 只有结构化证据明确支持时才使用 rolling、wave、isolation 等专业术语；否则使用通俗表达
+- 不要把 startTime/endTime 写进文案，它们只用于时间轴关联
 - 每条建议要温和，不攻击身材，不做医疗诊断
-- mismatches 至少 2 条，最多 4 条
+- mismatches 数量必须与结构化 issues 一致；没有证据时不要为了凑数编造问题
 - 只输出 JSON，不要输出其他内容`
 }
 
@@ -179,23 +185,30 @@ async function callGeminiTextApi(prompt) {
 
 async function analyzeMotionComparison(referenceVideo, practiceVideo, cropInfo, onProgress = () => {}, poseOptions = {}) {
   try {
+    const subjectSelections = cropInfo?.teacher || cropInfo?.user
+      ? cropInfo
+      : { teacher: null, user: cropInfo || null }
     const structuredAnalysis = await runPoseComparison({
       teacherVideo: referenceVideo,
       userVideo: practiceVideo,
       teacherCanvas: poseOptions.teacherCanvas,
       userCanvas: poseOptions.userCanvas,
-      cropInfo,
+      cropInfo: subjectSelections.user,
+      subjectSelections,
       audioAlignment: poseOptions.audioAlignment,
       onPoseFramesReady: poseOptions.onPoseFramesReady,
+      onTrackingStatus: poseOptions.onTrackingStatus,
       onProgress,
     })
-    const report = generateFeedbackFromAnalysis(structuredAnalysis, cropInfo)
+    onProgress('正在生成舞蹈建议...')
+    const report = generateFeedbackFromAnalysis(structuredAnalysis, subjectSelections.user)
     report.pipeline = "mediapipe_pose_dtw_metrics"
     return report
   } catch (error) {
     if (poseOptions.allowLegacyFallback !== true) throw error
     onProgress(`姿态识别暂不可用，正在使用本地路径兜底：${error.message}`)
-    const fallback = await analyzeLegacyMotionComparison(referenceVideo, practiceVideo, cropInfo, onProgress)
+    const fallbackCrop = cropInfo?.user || cropInfo
+    const fallback = await analyzeLegacyMotionComparison(referenceVideo, practiceVideo, fallbackCrop, onProgress)
     fallback.pipeline = "legacy_motion_fallback"
     fallback.aiSummary = `本次未能完成 MediaPipe 姿态识别，已先用本地运动路径兜底。${fallback.aiSummary}`
     fallback.structuredAnalysis = {

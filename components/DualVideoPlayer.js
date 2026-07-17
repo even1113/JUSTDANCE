@@ -23,19 +23,15 @@ function renderEmptyVideoPane(kind) {
 
 function renderUploadedVideoPane({ kind, file, url, fileSizeText, allowCrop = false }) {
   const cropButton = allowCrop
-    ? '<button class="crop-badge" type="button" id="cropBadge">框选自己</button>'
+    ? `<button class="crop-badge" type="button" data-subject-crop="${kind}">框选人物</button>`
     : ''
 
   return `
     <div class="video-preview" data-video-kind="${kind}">
       <div class="video-frame">
-        <video src="${escapeHtml(url)}" controls playsinline preload="metadata"></video>
+        <video src="${escapeHtml(url)}" playsinline preload="metadata"></video>
         <canvas class="pose-canvas" aria-hidden="true"></canvas>
-      </div>
-      <div class="video-frame-tools" aria-label="${kind === 'teacher' ? '老师视频' : '我的视频'}逐帧控制">
-        <button type="button" data-frame-step="-1" title="后退一帧" aria-label="后退一帧">‹</button>
-        <output data-video-time>0.00s</output>
-        <button type="button" data-frame-step="1" title="前进一帧" aria-label="前进一帧">›</button>
+        <output class="tracking-status hidden" data-tracking-status role="status"></output>
       </div>
       <div class="video-meta">
         <span>${escapeHtml(file.name)} · ${escapeHtml(fileSizeText)}</span>

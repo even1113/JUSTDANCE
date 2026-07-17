@@ -135,10 +135,17 @@ function computeTimingScore(teacherFrames, userFrames) {
     const averageAbsDelay = matched.length > 0
       ? average(matched.map((pair) => Math.abs(pair.user.timestamp - pair.teacher.timestamp)))
       : 0
+    const representative = matched
+      .map((pair) => ({
+        time: pair.teacher.timestamp,
+        delay: Math.abs(pair.user.timestamp - pair.teacher.timestamp),
+      }))
+      .sort((a, b) => b.delay - a.delay)[0]
 
     delays[bodyPart] = {
       delayMs: Math.round(averageDelay * 1000),
       absDelayMs: Math.round(averageAbsDelay * 1000),
+      representativeTime: representative?.time ?? 0,
     }
     scores.push(clamp(100 - averageAbsDelay * 480, 0, 100))
   })
@@ -176,60 +183,71 @@ function buildIssues({ poseSimilarity, timing, amplitude, control, alignedFrameP
   const biggestDelay = maxEntry(timing.delays, (entry) => entry.absDelayMs)
   const weakestAmplitude = minEntry(amplitude.ratios, (ratio) => ratio)
   const representativePair = alignedFramePairs[Math.floor(alignedFramePairs.length / 2)]
+  const worstPosePair = [...alignedFramePairs].sort((a, b) => b.distance - a.distance)[0]
 
   if (biggestDelay && biggestDelay.value.absDelayMs >= 120) {
-    issues.push({
+    issues.push(withTimeRange({
       type: biggestDelay.value.delayMs >= 0 ? 'timing_delay' : 'timing_early',
       bodyPart: biggestDelay.key,
       bodyPartLabel: BODY_PART_LABELS[biggestDelay.key],
       delayMs: biggestDelay.value.delayMs,
       severity: severityFromDelay(biggestDelay.value.absDelayMs),
-      teacherTimestamp: representativePair?.teacherTimestamp ?? 0,
-    })
+      teacherTimestamp: biggestDelay.value.representativeTime || representativePair?.teacherTimestamp || 0,
+    }))
   }
 
   if (weakestAmplitude && weakestAmplitude.value < 0.86) {
-    issues.push({
+    issues.push(withTimeRange({
       type: 'insufficient_amplitude',
       bodyPart: weakestAmplitude.key,
       bodyPartLabel: BODY_PART_LABELS[weakestAmplitude.key],
       ratio: Number(weakestAmplitude.value.toFixed(2)),
       severity: weakestAmplitude.value < 0.68 ? 'high' : 'medium',
       teacherTimestamp: representativePair?.teacherTimestamp ?? 0,
-    })
+    }))
   }
 
   if (control.endJitter >= 0.055) {
-    issues.push({
+    issues.push(withTimeRange({
       type: 'end_position_jitter',
       bodyPart: 'hip',
       bodyPartLabel: BODY_PART_LABELS.hip,
       severity: control.endJitter >= 0.1 ? 'high' : 'medium',
       teacherTimestamp: alignedFramePairs.at(-1)?.teacherTimestamp ?? 0,
-    })
+    }))
   }
 
   if (control.torsoTiltStd >= 10) {
-    issues.push({
+    issues.push(withTimeRange({
       type: 'torso_instability',
       bodyPart: 'torso',
       bodyPartLabel: BODY_PART_LABELS.torso,
       severity: control.torsoTiltStd >= 16 ? 'high' : 'medium',
       teacherTimestamp: representativePair?.teacherTimestamp ?? 0,
-    })
+    }))
   }
 
   if (poseSimilarity < 72) {
-    issues.push({
+    issues.push(withTimeRange({
       type: 'pose_similarity_gap',
       bodyPart: 'torso',
       bodyPartLabel: BODY_PART_LABELS.torso,
       severity: poseSimilarity < 56 ? 'high' : 'medium',
-      teacherTimestamp: representativePair?.teacherTimestamp ?? 0,
-    })
+      teacherTimestamp: worstPosePair?.teacherTimestamp ?? representativePair?.teacherTimestamp ?? 0,
+    }))
   }
 
   return issues.slice(0, 5)
+}
+
+function withTimeRange(issue) {
+  const teacherTimestamp = Math.max(0, Number(issue.teacherTimestamp) || 0)
+  return {
+    ...issue,
+    teacherTimestamp,
+    startTime: Number(Math.max(0, teacherTimestamp - 0.8).toFixed(2)),
+    endTime: Number((teacherTimestamp + 1.2).toFixed(2)),
+  }
 }
 
 function movementRange(frames, landmarkIndexes) {

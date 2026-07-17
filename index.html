@@ -6,19 +6,15 @@
     <meta name="theme-color" content="#f6f7f9" />
     <meta name="description" content="DanceMirror 帮你对照老师视频，找出这一遍最值得先修的动作问题。" />
     <title>DanceMirror - 舞蹈视频复盘助手</title>
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=20260717-upload-preview" />
   </head>
   <body>
     <div class="app-shell">
       <header class="app-header">
         <a class="brand" href="#upload" aria-label="返回 DanceMirror 上传页">
           <span class="brand-mark">DM</span>
-          <span class="brand-copy"><strong>DanceMirror</strong><small>看见这一遍最值得先修的问题</small></span>
+          <span class="brand-copy"><strong>DanceMirror</strong><small>舞蹈动作对照与练习复盘</small></span>
         </a>
-        <button class="header-action" type="button" id="privacyOpen" aria-label="隐私与本次数据">
-          <span class="header-action-icon" aria-hidden="true">✓</span>
-          <span>隐私与数据</span>
-        </button>
       </header>
 
       <nav class="flow-progress" aria-label="本次比对进度">
@@ -38,7 +34,6 @@
               <h1 id="uploadTitle">先把老师和你的这一遍放在一起</h1>
               <p>我们会自动对齐音乐、锁定人物，再帮你找出最明显的动作差异。</p>
             </div>
-            <span class="status-badge neutral">无需登录</span>
           </div>
 
           <div class="upload-grid">
@@ -54,7 +49,10 @@
                 <small>必须包含可识别的背景音乐</small>
               </button>
               <div class="upload-preview hidden" id="teacherUploadPreview">
-                <div class="mini-video-frame"><video muted playsinline preload="metadata"></video><div class="demo-pose hidden" data-demo-pose></div></div>
+                <div class="mini-video-frame">
+                  <video muted playsinline preload="metadata"></video><div class="demo-pose hidden" data-demo-pose></div>
+                  <span class="upload-success-note">✓ 上传成功</span>
+                </div>
                 <div class="upload-file-copy"><strong></strong><small></small></div>
                 <button class="icon-button danger" type="button" data-remove-video="teacher" aria-label="删除老师视频">×</button>
               </div>
@@ -73,7 +71,10 @@
                 <small>建议保留音乐，完整拍到全身</small>
               </button>
               <div class="upload-preview hidden" id="userUploadPreview">
-                <div class="mini-video-frame"><video muted playsinline preload="metadata"></video><div class="demo-pose hidden" data-demo-pose></div></div>
+                <div class="mini-video-frame">
+                  <video muted playsinline preload="metadata"></video><div class="demo-pose hidden" data-demo-pose></div>
+                  <span class="upload-success-note">✓ 上传成功</span>
+                </div>
                 <div class="upload-file-copy"><strong></strong><small></small></div>
                 <button class="icon-button danger" type="button" data-remove-video="user" aria-label="删除我的练习视频">×</button>
               </div>
@@ -203,7 +204,7 @@
         </section>
       </main>
 
-      <footer class="app-footer"><span>DanceMirror · 即来即用的舞蹈复盘助手</span><button type="button" id="footerPrivacy">隐私说明</button></footer>
+      <footer class="app-footer"><small>视频仅用于本次动作比对，不会公开展示；你可以随时删除本次数据。</small></footer>
     </div>
 
     <section class="comparison-workspace hidden" id="comparisonWorkspace" aria-label="双视频同步比对工作台">
@@ -215,7 +216,7 @@
       <div class="playback-panel">
         <div class="shared-timeline"><input id="sharedProgress" type="range" min="0" max="32" step="0.01" value="0" aria-label="共享视频进度" /><div class="timeline-overlay" id="timelineOverlay"></div></div>
         <div class="timeline-meta"><output id="sharedTime">00:00 / 00:32</output><span id="activeNodeLabel">尚未生成差异节点</span></div>
-        <div class="playback-controls"><button class="control-button" type="button" id="stepBack" aria-label="后退约一帧">−0.03</button><button class="control-button play" type="button" id="sharedPlay" aria-label="播放双视频">▶</button><button class="control-button" type="button" id="stepForward" aria-label="前进约一帧">+0.03</button><label class="speed-select"><span>速度</span><select id="playbackRate"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option></select></label><button class="loop-button" type="button" id="loopSegment" aria-pressed="false">循环 4 秒</button></div>
+        <div class="playback-controls"><button class="control-button" type="button" id="stepBack" aria-label="后退约一帧">−0.03</button><button class="control-button play" type="button" id="sharedPlay" aria-label="播放双视频">▶</button><button class="control-button" type="button" id="stepForward" aria-label="前进约一帧">+0.03</button><label class="speed-select"><span>速度</span><select id="playbackRate"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option></select></label></div>
       </div>
     </section>
 
@@ -257,6 +258,6 @@
       <strong>Demo 场景</strong><select id="scenarioSelect"><option value="standard">标准多人流程</option><option value="alignment-failed">自动对齐失败</option><option value="model-fallback">模型兜底</option><option value="tracking-lost">追踪丢失</option><option value="blocking-error">阻断错误</option></select><button type="button" id="reviewReset">重置</button>
     </aside>
 
-    <script type="module" src="./app.js"></script>
+    <script type="module" src="./app.js?v=20260717-upload-preview"></script>
   </body>
 </html>

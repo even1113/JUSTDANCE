@@ -1,231 +1,262 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>DanceMirror - AI舞蹈视频比对</title>
-    <link rel="icon" href="data:," />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="theme-color" content="#f6f7f9" />
+    <meta name="description" content="DanceMirror 帮你对照老师视频，找出这一遍最值得先修的动作问题。" />
+    <title>DanceMirror - 舞蹈视频复盘助手</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <main class="app-shell">
+    <div class="app-shell">
       <header class="app-header">
-        <div class="brand-mark">DM</div>
-        <div class="header-copy">
-          <span>逐帧比对</span>
-          <h1>DanceMirror</h1>
-        </div>
-        <button class="settings-toggle" type="button" id="settingsToggle" aria-label="设置">⚙</button>
+        <a class="brand" href="#upload" aria-label="返回 DanceMirror 上传页">
+          <span class="brand-mark">DM</span>
+          <span class="brand-copy"><strong>DanceMirror</strong><small>看见这一遍最值得先修的问题</small></span>
+        </a>
+        <button class="header-action" type="button" id="privacyOpen" aria-label="隐私与本次数据">
+          <span class="header-action-icon" aria-hidden="true">✓</span>
+          <span>隐私与数据</span>
+        </button>
       </header>
 
-      <section class="video-workspace" aria-labelledby="workspace-title">
-        <div class="workspace-title">
-          <div>
-            <span class="section-kicker">Frame Compare</span>
-            <h2 id="workspace-title">老师 vs 我的逐帧姿态</h2>
-          </div>
-          <span class="live-badge">等待比对</span>
-        </div>
-
-        <div class="video-stage compare-stage" id="compareStage">
-          <article class="compare-pane">
-            <div class="pane-header">
-              <span>老师示范</span>
-              <strong id="referenceStatus">未添加</strong>
-            </div>
-            <input id="referenceVideo" type="file" accept="video/*" />
-            <div class="preview empty compare-preview teacher-preview" id="referencePreview">
-              <div class="empty-video">
-                <span class="play-symbol">+</span>
-                <strong>添加老师视频</strong>
-                <small>点击选择视频文件</small>
-              </div>
-            </div>
-          </article>
-
-          <article class="compare-pane">
-            <div class="pane-header">
-              <span>我的练习</span>
-              <strong id="practiceStatus">未添加</strong>
-            </div>
-            <input id="practiceVideo" type="file" accept="video/*" />
-            <div class="preview empty compare-preview student-preview" id="practicePreview">
-              <div class="empty-video">
-                <span class="play-symbol">+</span>
-                <strong>添加我的视频</strong>
-                <small>点击选择视频文件</small>
-              </div>
-            </div>
-          </article>
-        </div>
-
-        <div class="audio-align-panel" aria-labelledby="audio-align-title">
-          <div class="audio-align-head">
-            <div>
-              <span class="section-kicker">Audio Alignment</span>
-              <h3 id="audio-align-title">音轨对齐</h3>
-            </div>
-            <output id="audioAlignStatus" data-state="idle">音轨尚未对齐</output>
-          </div>
-          <div class="audio-align-controls">
-            <button class="secondary-action compact-action audio-auto-action" type="button" id="autoAlignAudio">自动对齐音轨</button>
-            <label class="offset-control">
-              <span>用户视频偏移</span>
-              <input id="audioOffsetRange" type="range" min="-30" max="30" value="0" step="0.05" />
-            </label>
-            <label class="offset-number">
-              <input id="audioOffsetInput" type="number" min="-30" max="30" value="0" step="0.05" aria-label="用户视频偏移秒数" />
-              <span>秒</span>
-            </label>
-            <button class="secondary-action compact-action" type="button" id="applyManualOffset">应用偏移</button>
-          </div>
-        </div>
-
-        <section class="sync-controls hidden" id="syncControls" aria-label="双视频公共播放控制">
-          <div class="sync-toolbar">
-            <button class="sync-play" type="button" id="syncPlay" aria-label="播放双视频">播放</button>
-            <button type="button" id="frameBack" aria-label="后退一帧">−1 帧</button>
-            <button type="button" id="frameForward" aria-label="前进一帧">+1 帧</button>
-            <label class="speed-control">
-              <span>速度</span>
-              <select id="playbackRate">
-                <option value="0.5">0.5×</option>
-                <option value="0.75">0.75×</option>
-                <option value="1" selected>1×</option>
-                <option value="1.25">1.25×</option>
-              </select>
-            </label>
-            <button type="button" id="loopSegment" aria-pressed="false">循环 4 秒</button>
-          </div>
-          <div class="common-timeline">
-            <input id="commonProgress" type="range" min="0" max="0" value="0" step="0.01" aria-label="公共进度条" />
-            <div class="timeline-markers" id="timelineMarkers" aria-hidden="true"></div>
-          </div>
-          <div class="timeline-meta">
-            <output id="commonTime">00:00.00 / 00:00.00</output>
-            <output id="syncAccuracy">同步待校准</output>
-          </div>
-          <div class="manual-sync-tools">
-            <span>手动微调用户视频</span>
-            <button type="button" id="nudgeEarlier">提前 0.05s</button>
-            <button type="button" id="nudgeLater">延后 0.05s</button>
-          </div>
-        </section>
-
-        <section class="coach-panel" aria-labelledby="coach-panel-title">
-          <div class="coach-panel-head">
-            <div>
-              <span class="section-kicker">AI Coach</span>
-              <h3 id="coach-panel-title">AI 教练建议</h3>
-            </div>
-            <output id="currentAdviceTime">等待分析</output>
-          </div>
-          <p class="coach-empty" id="coachEmpty">完成音轨校准与动作分析后，建议会按公共时间轴显示在这里。</p>
-          <div class="issue-list hidden" id="issueList"></div>
-        </section>
-      </section>
-
-      <section class="control-sheet" aria-labelledby="config-title">
-        <div class="sheet-header">
-          <div>
-            <span class="section-kicker">AI Compare</span>
-            <h2 id="config-title">生成本次比对总结</h2>
-          </div>
-        </div>
-
-        <p class="compare-copy">
-          系统会先对齐两段音轨，再用 MediaPipe 逐帧提取 33 个身体关键点，计算姿态、幅度、节奏和控制差异。
-        </p>
-
-        <button class="primary-action" id="analyzeButton" disabled>请先完成音轨校准</button>
-        <p class="form-message" id="formMessage" role="status"></p>
-      </section>
-
-      <section class="analysis-panel hidden" id="analysisPanel" aria-live="polite">
-        <div class="analysis-card">
-          <div class="spinner"></div>
-          <div>
-            <h2>正在逐帧对齐两段视频</h2>
-            <p id="analysisStage">正在提取老师逐帧姿态...</p>
-          </div>
-        </div>
-        <ol class="analysis-steps" id="analysisSteps">
-          <li data-analysis-step="audio">正在提取音频</li>
-          <li data-analysis-step="calibration">正在校准视频</li>
-          <li data-analysis-step="pose">正在提取人体姿态</li>
-          <li data-analysis-step="compare">正在对比动作</li>
-          <li data-analysis-step="coach">正在生成舞蹈建议</li>
-          <li data-analysis-step="complete">等待完成</li>
+      <nav class="flow-progress" aria-label="本次比对进度">
+        <ol>
+          <li data-flow-step="upload" class="active"><span>1</span><em>添加视频</em></li>
+          <li data-flow-step="prepare"><span>2</span><em>自动准备</em></li>
+          <li data-flow-step="compare"><span>3</span><em>同步比对</em></li>
+          <li data-flow-step="report"><span>4</span><em>查看复盘</em></li>
         </ol>
-      </section>
+      </nav>
 
-      <section class="report hidden" id="report" aria-labelledby="report-title">
-        <div class="report-header">
-          <span class="section-kicker">AI Summary</span>
-          <h2 id="report-title">本次比对总结</h2>
-          <p id="coachNote"></p>
-          <div class="score-grid" id="scoreGrid" aria-label="姿态分析评分"></div>
-        </div>
-
-        <div class="report-section split">
-          <article>
-            <span class="section-kicker">Pose Notes</span>
-            <h3 id="drillTitle">下一次重点修正</h3>
-            <ul id="drillSteps"></ul>
-          </article>
-          <article>
-            <span class="section-kicker">How To Use</span>
-            <h3>复盘建议</h3>
-            <ul id="shootingAdvice"></ul>
-          </article>
-        </div>
-
-        <div class="report-actions">
-          <button class="secondary-action" type="button" id="recompareButton">重新比对</button>
-        </div>
-      </section>
-
-      <div class="crop-overlay hidden" id="cropOverlay">
-        <div class="crop-hint" id="cropHint">框选需要持续跟踪的人物</div>
-        <canvas id="cropCanvas"></canvas>
-        <div class="crop-actions">
-          <button class="crop-cancel" type="button" id="cropCancel">取消</button>
-          <button class="crop-clear" type="button" id="cropClear">清除框选</button>
-          <button class="crop-confirm" type="button" id="cropConfirm">确认框选</button>
-        </div>
-      </div>
-
-      <div class="settings-panel hidden" id="settingsPanel">
-        <div class="settings-card">
-          <div class="settings-header">
-            <h2>AI 设置</h2>
-            <button class="settings-close" type="button" id="settingsClose">✕</button>
+      <main id="appMain" tabindex="-1">
+        <section class="page-view active" data-stage="upload" aria-labelledby="uploadTitle">
+          <div class="page-heading split-heading">
+            <div>
+              <span class="eyebrow">NEW COMPARISON</span>
+              <h1 id="uploadTitle">先把老师和你的这一遍放在一起</h1>
+              <p>我们会自动对齐音乐、锁定人物，再帮你找出最明显的动作差异。</p>
+            </div>
+            <span class="status-badge neutral">无需登录</span>
           </div>
-          <label class="settings-field">
-            <span>API Endpoint</span>
-            <input id="apiEndpoint" type="url" placeholder="https://generativelanguage.googleapis.com/v1beta" />
-          </label>
-          <label class="settings-field">
-            <span>Model</span>
-            <input id="apiModel" type="text" placeholder="gemini-2.5-flash" />
-          </label>
-          <label class="settings-field">
-            <span>API Key</span>
-            <input id="apiKey" type="password" placeholder="填入你的 API Key" />
-          </label>
-          <p class="settings-hint">支持 Gemini API（免费注册：<a href="https://aistudio.google.com" target="_blank" rel="noopener">Google AI Studio</a>）。不填 Key 仍会使用浏览器本地姿态分析和教练建议。</p>
-          <button class="primary-action" type="button" id="settingsSave">保存设置</button>
-        </div>
-      </div>
-    </main>
 
-    <script type="importmap">
-      {
-        "imports": {
-          "@mediapipe/tasks-vision": "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/vision_bundle.mjs"
-        }
-      }
-    </script>
+          <div class="upload-grid">
+            <article class="video-upload-card teacher" data-upload-card="teacher">
+              <div class="upload-card-head">
+                <span class="role-label teacher">老师示范</span>
+                <output id="teacherUploadStatus">未添加</output>
+              </div>
+              <input id="teacherVideoInput" type="file" accept=".mp4,.mov,video/mp4,video/quicktime" />
+              <button class="upload-dropzone" type="button" data-pick-video="teacher">
+                <span class="upload-icon" aria-hidden="true">↑</span>
+                <strong>添加老师视频</strong>
+                <small>必须包含可识别的背景音乐</small>
+              </button>
+              <div class="upload-preview hidden" id="teacherUploadPreview">
+                <div class="mini-video-frame"><video muted playsinline preload="metadata"></video><div class="demo-pose hidden" data-demo-pose></div></div>
+                <div class="upload-file-copy"><strong></strong><small></small></div>
+                <button class="icon-button danger" type="button" data-remove-video="teacher" aria-label="删除老师视频">×</button>
+              </div>
+              <p class="field-message" id="teacherFieldMessage" role="status"></p>
+            </article>
+
+            <article class="video-upload-card user" data-upload-card="user">
+              <div class="upload-card-head">
+                <span class="role-label user">我的练习</span>
+                <output id="userUploadStatus">未添加</output>
+              </div>
+              <input id="userVideoInput" type="file" accept=".mp4,.mov,video/mp4,video/quicktime" />
+              <button class="upload-dropzone" type="button" data-pick-video="user">
+                <span class="upload-icon" aria-hidden="true">↑</span>
+                <strong>添加我的练习视频</strong>
+                <small>建议保留音乐，完整拍到全身</small>
+              </button>
+              <div class="upload-preview hidden" id="userUploadPreview">
+                <div class="mini-video-frame"><video muted playsinline preload="metadata"></video><div class="demo-pose hidden" data-demo-pose></div></div>
+                <div class="upload-file-copy"><strong></strong><small></small></div>
+                <button class="icon-button danger" type="button" data-remove-video="user" aria-label="删除我的练习视频">×</button>
+              </div>
+              <p class="field-message" id="userFieldMessage" role="status"></p>
+            </article>
+          </div>
+
+          <div class="input-rules">
+            <span>MP4 / MOV</span><span>单个最长 3 分钟</span><span>单个最大 500MB</span><span>横竖屏都支持</span>
+          </div>
+
+          <p class="mobile-compat-note"><strong>手机兼容说明：</strong>当前试用版由浏览器直接读取视频；若提示无法解析，请改用 H.264 视频编码、AAC 音频的 MP4。正式版将通过服务端转码统一兼容。</p>
+
+          <aside class="soft-callout">
+            <span class="callout-icon">i</span>
+            <p><strong>不用提前剪视频。</strong>我们会以老师视频的音乐为基准自动对齐；如果没有对齐成功，再请你手动选一次动作起点。</p>
+          </aside>
+
+          <div class="page-actions stacked-actions">
+            <button class="button primary" id="startProcessing" type="button" disabled>请先添加两段视频</button>
+            <button class="button text" id="loadDemoAssets" type="button">没有合适视频？使用演示素材</button>
+          </div>
+        </section>
+
+        <section class="page-view" data-stage="processing" aria-labelledby="processingTitle">
+          <div class="page-heading split-heading">
+            <div><span class="eyebrow">AUTO PREPARE</span><h1 id="processingTitle">正在帮你把两段视频准备好</h1><p>人物检测和音乐对齐会同时进行，你可以随时更换传错的视频。</p></div>
+            <span class="status-badge working"><span class="pulse-dot"></span>处理中</span>
+          </div>
+
+          <div class="asset-summary-row" id="processingAssets"></div>
+          <ol class="process-stepper" id="processingStepper" aria-live="polite"></ol>
+          <div class="processing-note"><span class="spinner-small"></span><p id="processingMessage">正在准备上传…</p></div>
+          <div class="page-actions twin-actions">
+            <button class="button secondary" type="button" data-replace-during-task="teacher">更换老师视频</button>
+            <button class="button secondary" type="button" data-replace-during-task="user">更换我的视频</button>
+          </div>
+        </section>
+
+        <section class="page-view" data-stage="subject-selection" aria-labelledby="subjectTitle">
+          <div class="page-heading">
+            <span class="eyebrow">SUBJECT LOCK</span>
+            <h1 id="subjectTitle">先确认这次要跟踪的人</h1>
+            <p id="subjectDescription">老师视频里检测到多人，请选择本次需要跟踪的示范者。</p>
+          </div>
+          <div class="selection-progress"><span id="subjectStepLabel">第 1 步，共 2 步</span><div><i class="active"></i><i></i></div></div>
+          <div class="subject-frame" id="subjectFrame">
+            <span class="role-label teacher" id="subjectRoleLabel">老师视频</span>
+            <div class="subject-stage-people" aria-hidden="true"></div>
+          </div>
+          <div class="candidate-grid" id="candidateGrid"></div>
+          <p class="selection-help">后续只分析你选中的人物；不会为画面里的其他人生成报告。</p>
+          <div class="page-actions stacked-actions subject-selection-actions">
+            <button class="button primary" id="confirmSubject" type="button" disabled>请选择一位人物</button>
+            <button class="button secondary" id="manualSubjectBox" type="button">没有识别准确，手动框选</button>
+          </div>
+        </section>
+
+        <section class="page-view" data-stage="manual-alignment" aria-labelledby="alignmentTitle">
+          <div class="page-heading">
+            <span class="eyebrow coral">MANUAL ALIGNMENT</span>
+            <h1 id="alignmentTitle">自动对齐没有成功，帮我们确认同一个动作起点</h1>
+            <p>分别拖到两段视频里相同动作刚开始的位置，再确认同步。</p>
+          </div>
+          <div class="alignment-grid">
+            <article class="alignment-card">
+              <span class="role-label teacher">老师视频</span><div class="calibration-video" data-calibration="teacher"></div>
+              <input class="calibration-range" id="teacherAnchorRange" type="range" min="0" max="32" step="0.1" value="7.2" aria-label="老师视频动作起点" />
+              <button class="button secondary compact" type="button" data-set-anchor="teacher">设为老师动作起点</button>
+              <output id="teacherAnchorOutput">尚未选择</output>
+            </article>
+            <article class="alignment-card">
+              <span class="role-label user">我的练习</span><div class="calibration-video" data-calibration="user"></div>
+              <input class="calibration-range" id="userAnchorRange" type="range" min="0" max="32" step="0.1" value="8.4" aria-label="我的视频动作起点" />
+              <button class="button secondary compact" type="button" data-set-anchor="user">设为我的动作起点</button>
+              <output id="userAnchorOutput">尚未选择</output>
+            </article>
+          </div>
+          <aside class="soft-callout"><span class="callout-icon">✓</span><p>不用追求毫秒级准确。选到同一个明显动作开始的位置，就足够完成这次复盘。</p></aside>
+          <div class="page-actions stacked-actions"><button class="button primary" id="confirmAlignment" type="button" disabled>请先选择两个动作起点</button><button class="button text" id="retryAutoAlignment" type="button">重新尝试自动对齐</button></div>
+        </section>
+
+        <section class="page-view" data-stage="ready" aria-labelledby="readyTitle">
+          <div class="page-heading split-heading">
+            <div><span class="eyebrow">COMPARE READY</span><h1 id="readyTitle">两段视频已经同步好了</h1><p>先播放确认人物和节奏，再生成动作分析。</p></div>
+            <span class="status-badge success">已自动对齐</span>
+          </div>
+          <div id="readyWorkspaceMount"></div>
+          <div class="quality-row"><span class="quality-check">✓</span><div><strong>人物已锁定，音乐已校准</strong><p>分析只会关注你选择的人物，并优先指出最明显的问题。</p></div><button class="button text compact" type="button" id="reselectSubject">重新选人</button></div>
+          <div class="page-actions stacked-actions"><button class="button primary" id="startAnalysis" type="button">生成动作分析</button><button class="button secondary" type="button" data-return-upload>更换视频</button></div>
+        </section>
+
+        <section class="page-view" data-stage="analyzing" aria-labelledby="analysisTitle">
+          <div class="analysis-hero">
+            <div class="analysis-orbit"><span></span><span></span><b>AI</b></div>
+            <span class="eyebrow">DANCE COACH</span>
+            <h1 id="analysisTitle">正在找出最明显的动作差异</h1>
+            <p>我们只会输出有足够依据的问题，不会为了凑数量给你打分。</p>
+          </div>
+          <ol class="process-stepper analysis-stepper" id="analysisStepper" aria-live="polite"></ol>
+          <div class="analysis-fallback hidden" id="analysisFallback"><span>i</span><p>AI 教练暂时没有连接成功，完成动作差异分析后会先展示结构化兜底结果。</p></div>
+          <div class="page-actions stacked-actions"><button class="button secondary" id="cancelAnalysis" type="button">取消本次分析</button><button class="button text" type="button" data-replace-during-task="user">换一个我的视频</button></div>
+        </section>
+
+        <section class="page-view" data-stage="report" aria-labelledby="reportTitle">
+          <div class="page-heading report-heading">
+            <span class="eyebrow">YOUR REVIEW</span>
+            <h1 id="reportTitle">这一遍的复盘</h1>
+            <p>拖动时间轴或点击差异节点，视频和下面的建议会一起切换。</p>
+          </div>
+          <div id="reportWorkspaceMount"></div>
+          <div class="tracking-gap hidden" id="trackingGapMessage"></div>
+          <section class="coach-summary" aria-labelledby="coachSummaryTitle">
+            <span class="summary-label">这次先看一个问题</span>
+            <h2 id="coachSummaryTitle"></h2>
+            <p id="coachSummaryText"></p>
+          </section>
+          <div class="report-layout">
+            <section><div class="section-heading"><div><span class="eyebrow">DIFFERENCES</span><h2>按重要性排序的动作差异</h2></div><span class="status-badge neutral" id="issueCount"></span></div><div class="issue-list" id="reportIssueList"></div></section>
+            <aside class="practice-panel"><span class="eyebrow lime">TODAY'S PRACTICE</span><h2>下一遍先这样练</h2><ol id="practiceSteps"></ol><div class="review-tips" id="reviewTips"></div><p class="safety-note" id="safetyNote"></p></aside>
+          </div>
+          <div class="page-actions stacked-actions"><button class="button secondary" type="button" data-return-upload>更换视频并开始新分析</button><button class="button text danger-text" type="button" id="deleteFromReport">删除本次数据</button></div>
+        </section>
+
+        <section class="page-view" data-stage="blocking-error" aria-labelledby="errorTitle">
+          <div class="blocking-state"><div class="error-symbol">!</div><span class="eyebrow coral">NEEDS ATTENTION</span><h1 id="errorTitle">这次没有处理成功</h1><p id="blockingErrorMessage">视频处理服务暂时不可用，请稍后重试。</p><div class="page-actions stacked-actions"><button class="button primary" id="retryFromError" type="button">重新尝试</button><button class="button secondary" type="button" data-return-upload>返回更换视频</button></div><small>如果连续失败，请确认浏览器和网络正常，或换一段更短的视频。</small></div>
+        </section>
+      </main>
+
+      <footer class="app-footer"><span>DanceMirror · 即来即用的舞蹈复盘助手</span><button type="button" id="footerPrivacy">隐私说明</button></footer>
+    </div>
+
+    <section class="comparison-workspace hidden" id="comparisonWorkspace" aria-label="双视频同步比对工作台">
+      <div class="workspace-head"><div><span class="eyebrow">FRAME COMPARE</span><h2>老师和我的动作</h2></div><span class="status-badge success" id="workspaceAlignmentBadge">同步完成</span></div>
+      <div class="dual-video-stage">
+        <article class="video-viewport teacher"><div class="viewport-label"><span class="role-label teacher">老师</span><span>目标人物已锁定</span></div><div class="viewport-media"><video id="teacherCompareVideo" muted playsinline preload="metadata"></video><div class="demo-pose hidden" data-demo-workspace="teacher"></div><div class="subject-lock-box" aria-hidden="true"></div></div></article>
+        <article class="video-viewport user"><div class="viewport-label"><span class="role-label user">我的练习</span><span>目标人物已锁定</span></div><div class="viewport-media"><video id="userCompareVideo" muted playsinline preload="metadata"></video><div class="demo-pose hidden" data-demo-workspace="user"></div><div class="subject-lock-box" aria-hidden="true"></div></div></article>
+      </div>
+      <div class="playback-panel">
+        <div class="shared-timeline"><input id="sharedProgress" type="range" min="0" max="32" step="0.01" value="0" aria-label="共享视频进度" /><div class="timeline-overlay" id="timelineOverlay"></div></div>
+        <div class="timeline-meta"><output id="sharedTime">00:00 / 00:32</output><span id="activeNodeLabel">尚未生成差异节点</span></div>
+        <div class="playback-controls"><button class="control-button" type="button" id="stepBack" aria-label="后退约一帧">−0.03</button><button class="control-button play" type="button" id="sharedPlay" aria-label="播放双视频">▶</button><button class="control-button" type="button" id="stepForward" aria-label="前进约一帧">+0.03</button><label class="speed-select"><span>速度</span><select id="playbackRate"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option></select></label><button class="loop-button" type="button" id="loopSegment" aria-pressed="false">循环 4 秒</button></div>
+      </div>
+    </section>
+
+    <div class="crop-backdrop hidden" id="cropBackdrop">
+      <section class="crop-dialog" role="dialog" aria-modal="true" aria-labelledby="cropTitle" aria-describedby="cropHint">
+        <div class="crop-dialog-head">
+          <div><span class="eyebrow">MANUAL SUBJECT LOCK</span><h2 id="cropTitle">框选要持续跟踪的人物</h2></div>
+          <button class="icon-button" id="cropClose" type="button" aria-label="关闭人物框选">×</button>
+        </div>
+        <div class="crop-stage" id="cropStage">
+          <video id="cropVideo" muted playsinline preload="metadata"></video>
+          <div class="crop-demo hidden" id="cropDemo" aria-hidden="true"></div>
+          <div class="crop-selection" id="cropSelection" aria-hidden="true"><span>分析这个人</span></div>
+        </div>
+        <p class="crop-hint" id="cropHint">在人物全身外侧拖动一个框。框选区域会换算到视频原始尺寸，不受手机屏幕缩放影响。</p>
+        <div class="crop-dialog-actions">
+          <button class="button text compact" id="cropReset" type="button">恢复中央区域</button>
+          <button class="button secondary" id="cropCancel" type="button">取消</button>
+          <button class="button primary" id="cropConfirm" type="button">确认框选</button>
+        </div>
+      </section>
+    </div>
+
+    <div class="drawer-backdrop hidden" id="privacyBackdrop">
+      <aside class="bottom-drawer" role="dialog" aria-modal="true" aria-labelledby="privacyTitle">
+        <div class="drawer-handle"></div><div class="drawer-head"><div><span class="eyebrow">PRIVACY</span><h2 id="privacyTitle">隐私与本次数据</h2></div><button class="icon-button" id="privacyClose" type="button" aria-label="关闭隐私说明">×</button></div>
+        <div class="privacy-points"><div><span>01</span><p><strong>无需注册账号</strong><small>本次 Demo 不建立用户档案或历史记录。</small></p></div><div><span>02</span><p><strong>大模型不直接读取视频</strong><small>先生成结构化动作差异，再整理成易懂反馈。</small></p></div><div><span>03</span><p><strong>你可以随时删除</strong><small>删除后会清空当前会话、视频引用和报告。</small></p></div></div>
+        <div class="drawer-actions"><button class="button danger" id="deleteSession" type="button">删除本次数据</button><button class="button secondary" id="privacyDone" type="button">我知道了</button></div>
+      </aside>
+    </div>
+
+    <div class="modal-backdrop hidden" id="confirmBackdrop">
+      <section class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirmTitle"><div class="modal-icon" id="confirmIcon">!</div><h2 id="confirmTitle">确认操作</h2><p id="confirmMessage"></p><div class="modal-actions"><button class="button secondary" id="confirmCancel" type="button">先不操作</button><button class="button danger" id="confirmAction" type="button">确认</button></div></section>
+    </div>
+
+    <div class="toast-region" aria-live="polite" aria-atomic="true"><div class="toast hidden" id="toast"><span>✓</span><p></p></div></div>
+
+    <aside class="review-toolbar hidden" id="reviewToolbar" aria-label="Demo 状态切换工具">
+      <strong>Demo 场景</strong><select id="scenarioSelect"><option value="standard">标准多人流程</option><option value="alignment-failed">自动对齐失败</option><option value="model-fallback">模型兜底</option><option value="tracking-lost">追踪丢失</option><option value="blocking-error">阻断错误</option></select><button type="button" id="reviewReset">重置</button>
+    </aside>
+
     <script type="module" src="./app.js"></script>
   </body>
 </html>

@@ -1,147 +1,196 @@
-<!-- version: v0.5 | updated: 2026-07-17 -->
+<!-- version: v0.6 | updated: 2026-07-18 -->
 # DanceMirror Tech Spec
 
 ## Changelog
 
-- v0.5 (2026-07-17): Demo 引入显式页面状态机与可取消 Mock 任务；产品目标架构改为受控后端模型服务，移除客户端 Key 与评分输出
-- v0.4 (2026-07-17): 分段音频时间映射、公共播放轴、多人主体锁定与丢失保护
-- v0.3 (2026-07-15): 纯前端音轨对齐、MediaPipe 逐帧姿态识别和 DTW 动作对齐
-- v0.2 (2026-07-10): 即来即用 H5，移除 auth API，简化架构
-- v0.1 (2026-07-01): 初始版本
+- v0.6 (2026-07-18)：落地真实 API/Worker、PostgreSQL、Redis、OSS、本地磁盘、FFmpeg、DeepSeek v4 与 24 小时清理架构
+- v0.5 (2026-07-17)：Demo 引入显式页面状态机与受控后端目标架构
+- v0.4 (2026-07-17)：分段音频映射、公共播放轴、多人主体锁定与丢失保护
 
-## 1. 推荐技术路线
+## 1. 当前技术结论
 
-阶段 0：H5 可交互 Demo（当前）
+当前项目是“原生 H5 + 受控 Node.js 后端”的 Beta 实现，不重做现有 Demo，也不引入登录体系。
 
-- 目标：快速验证产品流、报告结构、视觉方向
-- 技术：HTML/CSS/JavaScript、Web Audio API、MediaPipe Tasks Vision
-- 即来即用，无需登录
-- 本地文件只用于浏览器预览；H5 会先读取时长与画面尺寸，并在浏览器解码失败时阻断后续流程、提示转换为 H.264 + AAC MP4
-- 当前 H5 不具备客户端转码能力；异步转码、人物检测、对齐和分析仍由可取消 Mock 服务模拟，跨浏览器格式统一必须在阶段 1 由服务端完成
+- H5：文件预校验、本地预览、音轨校准、MediaPipe 姿态提取、目标跟踪、DTW 和结构化差异。
+- API：匿名会话、签名上传、任务状态、报告查询、取消、删除和短期播放 URL。
+- Worker：FFmpeg 媒体准备和 DeepSeek/规则报告生成。
+- PostgreSQL：匿名会话、视频索引、结构化动作结果、任务与最终报告。
+- Redis/BullMQ：可重试、可持久化的媒体和分析任务。
+- 存储：开发环境使用本地磁盘；生产使用阿里云深圳私有 OSS Bucket。
+- 模型：DeepSeek 官方 OpenAI-compatible API，Flash 为主、Pro 为备用。
 
-阶段 1：H5 + 受控后端分析 API
+正式模式不会把原始视频、视频 URL、抽帧、关键点或模型 Key发送给 DeepSeek。
 
-- 服务端统一管理模型 API Key、额度、超时重试和任务状态
-- 姿态识别、动作差异和校准先生成结构化结果，再交给单一主模型转化为用户可理解的反馈
-- 模型失败时返回本地/服务端结构化兜底报告；预留模型替换接口，不建设多模型管理平台
+## 2. 运行模式
 
-阶段 2：微信小程序 / H5 双端
+### embedded
 
-- 推荐：Taro + React 或 uni-app + Vue
-- 原因：用户场景在手机和微信里，便于分享、低门槛试用
+用于无 Docker 的本地开发：
 
-阶段 3：独立 App
+- 内存任务存储；
+- 本地磁盘媒体；
+- 进程内异步队列；
+- 支持真实上传、FFmpeg 转码和 DeepSeek；
+- 重启后任务状态不保留，不用于生产。
 
-- 推荐：React Native 或 Flutter
-- 前提：已经验证 AI 复盘价值和用户留存
+### persistent
 
-## 2. MVP 架构
+用于 Docker 和生产：
+
+- PostgreSQL 持久化；
+- Redis/BullMQ 队列；
+- 独立 API、Worker 和 Cleanup 进程；
+- 本地共享卷或 OSS 存储；
+- API 与 Worker 可独立重启。
+
+## 3. 架构
 
 ```text
-H5 Client（单页面、纯前端）
-  本地视频 URL
-  老师时间轴为主的双视频公共播放控制
-  Web Audio 起音包络、全局互相关与分段漂移回归
-  公共时间 -> 老师/用户原始时间映射（不修改原视频）
-  MediaPipe Pose Landmarker（VIDEO 模式、最多 4 人）
-  两侧独立目标跟踪器（框选、预测位置、人体轮廓、关键点形态）
-  目标丢失区间与禁止静默换人
-  33 个关键点与世界坐标
-  归一化 / 平滑 / 插值 / 镜像校正
-  DTW 动作序列对齐
-  结构化差异与分析质量标记（不生成用户能力评分）
-        |
-        v
-Report
-  issues
-  timestamps
-  diff explanation
-  drills
-  filming/outfit advice
+Mobile H5
+  ├─ local preview
+  ├─ audio alignment + pose/DTW
+  └─ validated structuredAnalysis
+          │
+          v
+Node API ───── PostgreSQL
+  │               sessions / video_assets / analysis_tasks
+  ├─ signed URL
+  v
+Local disk or private Alibaba OSS
+  │
+  v
+Redis / BullMQ ── Worker
+                    ├─ FFprobe validation
+                    ├─ FFmpeg H.264 + AAC
+                    ├─ DeepSeek v4 Flash -> v4 Pro
+                    └─ rule-report fallback
 ```
 
-当前 Demo 不依赖业务后端，目的是验证上传、人物选择、对齐、同步比对、差异定位和报告阅读的完整产品路径。它不代表正式 MVP 的安全架构：正式版本禁止用户在前端提供模型 Key，也禁止在仓库中保存 Key。报告默认不做本地持久化。
+首版把姿态识别保留在 H5，是为了复用已经验证的算法并缩短真实闭环；这不是最终算力位置。完成 3–5 组真实视频压测后，再依据耗时、手机发热、内存和成功率决定是否把抽帧与姿态识别迁入 Worker。
 
-播放同步规则：
+## 4. 核心链路
 
-- 老师视频提供声音并作为主时钟，用户视频静音跟随。
-- 公共时间轴根据 `teacherStart / teacherEnd / mapAnchors` 分别映射到两段原始视频。
-- 同步误差小于 100ms 时使用不超过 1.5% 的短时速度修正；超过 100ms 时重新定位用户视频。
-- 自动音频校准失败时，允许以 0.05 秒步长前后微调并循环当前 4 秒片段。
+### 4.1 上传与转码
 
-人物跟踪规则：
+1. H5 创建匿名 session，持有只用于本次会话的 Bearer token。
+2. H5 向 API 提交角色、文件名、类型和大小。
+3. API 创建视频索引并返回短期签名 PUT URL。
+4. H5 直接上传到本地签名端点或 OSS，不经过 API 内存缓冲。
+5. H5 调用 complete；API 校验对象大小并把 `media.prepare` 写入队列。
+6. Worker 使用 FFprobe 校验真实容器、时长、尺寸、编码和老师音轨。
+7. Worker 使用 FFmpeg 输出 H.264 + AAC、最高 1080p/30fps MP4。
+8. H5 轮询 session，直到两段视频均为 ready。
 
-- 老师和用户分别保存框选区域与跟踪状态。
-- 首帧优先选择与框选区域重叠的人体；未框选时选择可见度和主体面积更高的人体。
-- 后续帧综合预测中心、人体框重叠、归一化关键点形态和框选证据匹配。
-- 匹配不可信时记录“目标人物暂时丢失”区间并停止绘制骨架，不自动切换到其他候选人。
-- 手动框选使用 Pointer Events 同时覆盖鼠标与触控；显示区域坐标必须换算为原视频尺寸坐标，不能直接保存手机屏幕像素。
-- 框选弹层使用动态视口与安全区，确认/取消操作在 iPhone Safari、Android Chrome 和微信内置浏览器中始终可达。
+单文件限制：MP4/MOV、500MB、3 分钟。用户无音轨时转码文件补静音 AAC，但分析进入手动音轨校准；老师无音轨直接失败。
 
-## 3. 前端页面
+### 4.2 动作分析与报告
 
-MVP 单页面应用中的页面级状态：
+1. H5 使用老师音轨作为公共时间轴基准，自动对齐失败时接受手动 anchor。
+2. MediaPipe Pose Landmarker 从项目本地资源加载，不依赖运行时 CDN。
+3. 双侧 tracker 锁定同一目标；不可信时记录 tracking gap，不静默换人。
+4. H5 输出无评分的 `structuredAnalysis`，服务端再次运行时校验。
+5. Worker 先生成确定性的规则报告，再调用 DeepSeek 改写教练文案。
+6. Flash 失败后尝试 Pro；全部失败或输出无效时返回规则报告，任务状态为 `fallback`。
+7. 模型只能改变文案，不得改变问题数量、时间区间、严重度和证据。
 
-- 双视频上传
-- 自动准备与任务取消
-- 多人目标选择
-- 自动对齐失败后的手动校准
-- 同步比对确认
-- 分析中
-- AI 复盘报告
-- 阻断错误、模型兜底、追踪丢失、隐私与删除
+## 5. API
 
-## 4. API 草案
+| Method | Path | 用途 |
+|---|---|---|
+| POST | `/api/sessions` | 创建匿名会话 |
+| GET | `/api/sessions/:id` | 恢复会话和视频状态 |
+| DELETE | `/api/sessions/:id` | 删除本次所有数据 |
+| POST | `/api/sessions/:id/videos` | 创建视频索引和签名上传目标 |
+| POST | `/api/videos/:id/complete` | 完成上传并排队转码 |
+| DELETE | `/api/videos/:id` | 删除单个视频并使旧任务失效 |
+| POST | `/api/sessions/:id/analysis` | 提交结构化动作分析并排队生成报告 |
+| GET | `/api/analysis/:id` | 查询分析状态和报告 |
+| DELETE | `/api/analysis/:id` | 取消分析 |
+| GET | `/api/health/live` | 进程存活检查 |
+| GET | `/api/health/ready` | 存储、数据库和队列就绪检查 |
 
-创建分析任务：
+除创建会话与健康检查外，资源接口均要求本次 session token。Token 只保存 SHA-256 摘要，不写入日志和数据库明文。
 
-```http
-POST /api/analysis
+## 6. 数据与存储
+
+### PostgreSQL
+
+- `sessions`：状态、当前输入版本、活动任务、24 小时过期时间。
+- `video_assets`：角色、原文件信息、存储 key、处理状态、媒体元数据。
+- `analysis_tasks`：结构化输入、报告、模型、fallback、错误码和取消时间。
+
+视频二进制不进入数据库。
+
+### OSS
+
+- Bucket ACL 必须为 private。
+- 浏览器上传和播放只使用 15 分钟短期签名 URL。
+- API/Worker 的对象操作可以使用深圳内网 endpoint；给浏览器的签名 URL 始终使用公网 endpoint。
+- RAM 用户只授予目标 Bucket 前缀所需的读取、写入、列举和删除权限。
+- CORS 只允许正式 H5 域名执行 PUT/GET/HEAD。
+
+对象前缀：`sessions/{sessionId}/{teacher|user|analysis}/...`。
+
+## 7. 清理和删除
+
+- 任务完成或最后一次有效操作后保留 24 小时。
+- Cleanup 进程默认每 60 分钟扫描过期 session。
+- 先删除 session 对象前缀，再级联删除 PostgreSQL 会话、视频索引、任务、结构化结果和报告。
+- 用户点击“删除本次数据”执行同一数据范围的即时删除。
+- OSS 生命周期规则建议设置为 2 天，只处理服务端异常时遗留的对象，不替代业务清理。
+- Worker 临时目录无论成功、失败或取消都必须清理。
+
+## 8. DeepSeek
+
+环境变量：
+
+```text
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-v4-flash
+DEEPSEEK_FALLBACK_MODEL=deepseek-v4-pro
+DEEPSEEK_API_KEY=secret
 ```
 
-请求：
+- 只允许 `deepseek-v4-flash` 和 `deepseek-v4-pro`。
+- 请求使用 `/v1/chat/completions`、JSON Object 输出和关闭 thinking。
+- 默认超时 45 秒，Flash 最多重试一次，随后尝试 Pro。
+- 任何 HTTP、超时、JSON 或 Report v1 错误都进入规则报告降级。
+- 日志只记录安全错误码和任务 id，不记录 Key、模型请求正文或完整报告。
 
-```json
-{
-  "practiceVideoUrl": "https://cdn.example.com/practice.mp4",
-  "referenceVideoUrl": "https://cdn.example.com/reference.mp4",
-  "danceStyle": "kpop",
-  "goal": "timing"
-}
+## 9. 部署
+
+本地持久化环境：
+
+```bash
+docker compose up -d --build
 ```
 
-响应：
+阿里云单机 Beta：
 
-```json
-{
-  "analysisId": "ana_123",
-  "status": "queued"
-}
+```bash
+docker compose --env-file .env \
+  -f docker-compose.yml \
+  -f deploy/docker-compose.aliyun.yml \
+  up -d --build
 ```
 
-获取分析结果：
+初期为 1 个 API、1 个 Worker（并发 1–2）、1 个 Cleanup、PostgreSQL 和 Redis。不要在真实视频压测前建设集群。TLS 推荐由阿里云 ALB/SLB 或已备案域名证书终止，再转发到 Nginx。
 
-```http
-GET /api/analysis/ana_123
-```
+详细步骤见 `docs/DEPLOY_ALIYUN.md`。
 
-响应参考 `docs/AI_SPEC.md`。
+## 10. 质量门槛
 
-## 5. 隐私与合规
+- `npm run check`：ESLint、HTMLHint、Stylelint、contract/unit/integration tests。
+- `npm run build`：生成可发布静态构建并包含本地 MediaPipe 运行时。
+- 媒体冒烟：真实 MP4/MOV 上传、FFprobe 校验、FFmpeg 输出和 Range 播放。
+- 模型冒烟：只用非敏感结构化 fixture 调用 Flash，并校验 Report v1。
+- 容器验收：API/Worker/PostgreSQL/Redis/Cleanup 全部健康。
+- 真实视频验收：3–5 对仓库外测试视频，不提交、不公开。
+- 移动端：iPhone Safari、Android Chrome、微信内置浏览器。
 
-视频是敏感用户数据，第一版也要有边界：
+## 11. 已知边界
 
-- 明确告知视频用途
-- 不默认公开用户视频
-- 不把 AI 建议描述为医疗、康复或专业诊断
-- 视频仅在本地预览，后端只在用户确认分析后处理
-
-## 6. 质量要求
-
-- 上传失败、分析失败、视频格式不支持都要有友好提示
-- 手机端视频元素不得用固有尺寸撑开页面；上传预览、人物框选与双视频工作台在 375px 宽度下不得出现横向滚动
-- 浏览器可读取元数据但无法解码画面时，必须进入 `decode_failed`，不得继续显示为可分析状态
-- 报告 schema 要稳定，便于前端渲染和后续模型替换
-- 所有 mock 数据集中管理，不散落在 UI 中
-- 真接 AI 前先写 contract tests，避免模型输出破坏页面
-- 每次修改后运行 `npm run check`
+- 自动多人代表帧候选尚未完成，当前提供自动主目标与双侧手动框选。
+- 姿态识别和音轨对齐仍在浏览器执行，低端手机的耗时和内存需真实压测。
+- 当前开发机没有 Docker，容器文件只能做静态验证，需在具备 Docker 的机器完成运行验收。
+- 尚未购买 ECS、域名、OSS 等资源，因此没有线上地址或 OSS/RDS/Redis 实测结果。

@@ -51,9 +51,10 @@
               <div class="upload-preview hidden" id="teacherUploadPreview">
                 <div class="mini-video-frame">
                   <video muted playsinline preload="metadata"></video><div class="demo-pose hidden" data-demo-pose></div>
-                  <span class="upload-success-note">✓ 上传成功</span>
+                  <span class="upload-success-note">正在准备</span>
                 </div>
                 <div class="upload-file-copy"><strong></strong><small></small></div>
+                <progress class="upload-progress hidden" id="teacherUploadProgress" max="100" value="0" aria-label="老师视频上传进度"></progress>
                 <button class="icon-button danger" type="button" data-remove-video="teacher" aria-label="删除老师视频">×</button>
               </div>
               <p class="field-message" id="teacherFieldMessage" role="status"></p>
@@ -73,9 +74,10 @@
               <div class="upload-preview hidden" id="userUploadPreview">
                 <div class="mini-video-frame">
                   <video muted playsinline preload="metadata"></video><div class="demo-pose hidden" data-demo-pose></div>
-                  <span class="upload-success-note">✓ 上传成功</span>
+                  <span class="upload-success-note">正在准备</span>
                 </div>
                 <div class="upload-file-copy"><strong></strong><small></small></div>
+                <progress class="upload-progress hidden" id="userUploadProgress" max="100" value="0" aria-label="我的练习视频上传进度"></progress>
                 <button class="icon-button danger" type="button" data-remove-video="user" aria-label="删除我的练习视频">×</button>
               </div>
               <p class="field-message" id="userFieldMessage" role="status"></p>
@@ -86,7 +88,7 @@
             <span>MP4 / MOV</span><span>单个最长 3 分钟</span><span>单个最大 500MB</span><span>横竖屏都支持</span>
           </div>
 
-          <p class="mobile-compat-note"><strong>手机兼容说明：</strong>当前试用版由浏览器直接读取视频；若提示无法解析，请改用 H.264 视频编码、AAC 音频的 MP4。正式版将通过服务端转码统一兼容。</p>
+          <p class="mobile-compat-note"><strong>视频处理说明：</strong>选择后会先显示本地预览，并上传到服务端统一转换为 H.264 + AAC MP4；处理完成前请保持页面打开。</p>
 
           <aside class="soft-callout">
             <span class="callout-icon">i</span>
@@ -243,7 +245,7 @@
     <div class="drawer-backdrop hidden" id="privacyBackdrop">
       <aside class="bottom-drawer" role="dialog" aria-modal="true" aria-labelledby="privacyTitle">
         <div class="drawer-handle"></div><div class="drawer-head"><div><span class="eyebrow">PRIVACY</span><h2 id="privacyTitle">隐私与本次数据</h2></div><button class="icon-button" id="privacyClose" type="button" aria-label="关闭隐私说明">×</button></div>
-        <div class="privacy-points"><div><span>01</span><p><strong>无需注册账号</strong><small>本次 Demo 不建立用户档案或历史记录。</small></p></div><div><span>02</span><p><strong>大模型不直接读取视频</strong><small>先生成结构化动作差异，再整理成易懂反馈。</small></p></div><div><span>03</span><p><strong>你可以随时删除</strong><small>删除后会清空当前会话、视频引用和报告。</small></p></div></div>
+        <div class="privacy-points"><div><span>01</span><p><strong>无需注册账号</strong><small>本次任务不建立用户档案或历史记录。</small></p></div><div><span>02</span><p><strong>大模型不直接读取视频</strong><small>先在本地生成结构化动作差异，再由服务端整理成易懂反馈。</small></p></div><div><span>03</span><p><strong>24 小时内自动清理</strong><small>你也可以随时删除本次原视频、处理文件、任务和报告。</small></p></div></div>
         <div class="drawer-actions"><button class="button danger" id="deleteSession" type="button">删除本次数据</button><button class="button secondary" id="privacyDone" type="button">我知道了</button></div>
       </aside>
     </div>

@@ -50,13 +50,18 @@ const ISSUE_COPY = {
 }
 
 function generateFeedbackFromAnalysis(analysis, cropInfo = null) {
-  const issues = analysis.issues.length > 0 ? analysis.issues.slice(0, 3) : [buildDefaultIssue(analysis)]
-  const mismatches = issues.map((issue) => issueToMismatch(issue))
+  const issues = analysis.issues.slice(0, 3)
+  if (issues.length === 0) {
+    const error = new Error('当前视频没有形成可信的结构化差异，请改善拍摄条件后重试。')
+    error.code = 'no_trusted_difference'
+    throw error
+  }
+  const mismatches = issues.map((issue, index) => issueToMismatch(issue, index))
   const primary = mismatches[0]
 
   return normalizeCoachingReport({
-    id: `pose_${Date.now()}`,
-    createdAt: new Date().toISOString(),
+    schemaVersion: '1.0',
+    id: createReportId('pose'),
     title: primary.title,
     aiSummary: buildSummary(analysis),
     mismatches,
@@ -65,43 +70,53 @@ function generateFeedbackFromAnalysis(analysis, cropInfo = null) {
       steps: buildDrillSteps(issues),
     },
     reviewAdvice: buildReviewAdvice(analysis, cropInfo),
-    scores: {
-      overallScore: analysis.overallScore,
-      poseSimilarity: analysis.poseSimilarity,
-      timingScore: analysis.timingScore,
-      amplitudeScore: analysis.amplitudeScore,
-      controlScore: analysis.controlScore,
-    },
-    structuredAnalysis: buildStructuredAnalysisForModel(analysis),
+    trackingGaps: buildTrackingGaps(analysis),
     safetyNote: '以上建议仅用于舞蹈训练参考，如出现疼痛或不适请停止练习。',
   })
 }
 
 function buildStructuredAnalysisForModel(analysis) {
+  const durationSec = Number(analysis.audioAlignment?.overlapDurationSec) || 0
   return {
-    comparisonSummary: {
-      strongestDimension: strongestScore(analysis).key,
-      weakestDimension: weakestScore(analysis).key,
-      mirroredUserVideo: analysis.mirroredUserVideo,
-      timelineDurationSec: analysis.audioAlignment?.overlapDurationSec || 0,
-      trackingQuality: {
-        teacherLostDurationSec: analysis.tracking?.teacher?.lostDurationSec || 0,
-        userLostDurationSec: analysis.tracking?.user?.lostDurationSec || 0,
-      },
+    schemaVersion: '1.0',
+    durationSec,
+    mirroredUserVideo: Boolean(analysis.mirroredUserVideo),
+    quality: {
+      teacherFrameCount: Number(analysis.poseFrameCounts?.teacher || analysis.diagnostics?.teacherFrameCount) || 0,
+      userFrameCount: Number(analysis.poseFrameCounts?.user || analysis.diagnostics?.userFrameCount) || 0,
+      alignedPairCount: Number(analysis.diagnostics?.alignedPairCount || analysis.alignedFramePairs?.length) || 0,
+      teacherLostDurationSec: Number(analysis.tracking?.teacher?.lostDurationSec) || 0,
+      userLostDurationSec: Number(analysis.tracking?.user?.lostDurationSec) || 0,
     },
-    issues: analysis.issues.map((issue) => ({
-      type: issue.type,
-      bodyPart: issue.bodyPart,
-      bodyPartLabel: issue.bodyPartLabel,
-      severity: issue.severity,
-      startTime: issue.startTime,
-      endTime: issue.endTime,
-      timingDirection: issue.type === 'timing_delay'
-        ? 'slightly_late'
-        : issue.type === 'timing_early' ? 'slightly_early' : null,
-      amplitudeBand: issue.type === 'insufficient_amplitude' ? 'shorter_than_reference' : null,
-    })),
+    trackingGaps: buildTrackingGaps(analysis),
+    issues: analysis.issues.map((issue) => {
+      const interval = normalizeIssueInterval(issue, durationSec)
+      return {
+        type: issue.type,
+        bodyPart: issue.bodyPart,
+        bodyPartLabel: issue.bodyPartLabel,
+        severity: issue.severity,
+        startTime: interval.startTime,
+        endTime: interval.endTime,
+        evidence: compactEvidence(issue),
+      }
+    }),
   }
+}
+
+function normalizeIssueInterval(issue, durationSec) {
+  const minimumGap = Math.min(0.01, durationSec)
+  const rawStart = Number(issue.startTime)
+  const startTime = Number(Math.min(
+    Math.max(0, Number.isFinite(rawStart) ? rawStart : 0),
+    Math.max(0, durationSec - minimumGap),
+  ).toFixed(3))
+  const rawEnd = Number(issue.endTime)
+  const endTime = Number(Math.min(
+    durationSec,
+    Math.max(startTime + minimumGap, Number.isFinite(rawEnd) ? rawEnd : startTime + 0.4),
+  ).toFixed(3))
+  return { endTime, startTime }
 }
 
 function buildSummary(analysis) {
@@ -129,7 +144,7 @@ function scoreEntries(analysis) {
   ]
 }
 
-function issueToMismatch(issue) {
+function issueToMismatch(issue, index = 0) {
   const copy = ISSUE_COPY[issue.type] || ISSUE_COPY.pose_similarity_gap
   const startTime = Number(issue.startTime) || Math.max(0, (issue.teacherTimestamp || 0) - 0.8)
   const endTime = Math.max(startTime + 0.4, Number(issue.endTime) || startTime + 2)
@@ -143,7 +158,11 @@ function issueToMismatch(issue) {
     impact: copy.impact(issue),
     practice: copy.practice(issue),
     encouragement: copy.encouragement(issue),
-    priority: issue.severity === 'high' ? 'high' : 'medium',
+    id: `issue_${index + 1}`,
+    priority: index + 1,
+    severity: issue.severity || 'medium',
+    quality: 'trusted',
+    evidenceSummary: evidenceSummary(issue),
   })
 }
 
@@ -202,19 +221,6 @@ function buildCompatibleMismatch(issue) {
   }
 }
 
-function buildDefaultIssue(analysis) {
-  const timestamp = analysis.alignedFramePairs[Math.floor(analysis.alignedFramePairs.length / 2)]?.teacherTimestamp ?? 0
-  return {
-    type: 'pose_similarity_gap',
-    bodyPart: 'torso',
-    bodyPartLabel: '躯干',
-    severity: analysis.poseSimilarity >= 82 ? 'low' : 'medium',
-    teacherTimestamp: timestamp,
-    startTime: Math.max(0, timestamp - 0.8),
-    endTime: timestamp + 1.2,
-  }
-}
-
 function buildDrillSteps(issues) {
   const first = issues[0]
 
@@ -269,6 +275,42 @@ function formatTimestamp(seconds) {
   const minutes = Math.floor(safeSeconds / 60)
   const rest = Math.floor(safeSeconds % 60)
   return `${String(minutes).padStart(2, '0')}:${String(rest).padStart(2, '0')}`
+}
+
+function compactEvidence(issue) {
+  const evidence = {}
+  if (Number.isFinite(issue.delayMs)) evidence.timingOffsetSec = Number((issue.delayMs / 1000).toFixed(3))
+  if (Number.isFinite(issue.ratio)) evidence.amplitudeRatio = Number(issue.ratio.toFixed(3))
+  if (issue.type === 'end_position_jitter') evidence.observation = 'user_end_position_has_extra_motion'
+  if (issue.type === 'torso_instability') evidence.observation = 'user_torso_direction_varies_more_than_reference'
+  if (issue.type === 'pose_similarity_gap') evidence.observation = 'aligned_body_outline_differs_from_reference'
+  return evidence
+}
+
+function evidenceSummary(issue) {
+  if (issue.type === 'timing_delay') return `${issue.bodyPartLabel}在对应动作中的启动时间晚于老师。`
+  if (issue.type === 'timing_early') return `${issue.bodyPartLabel}在对应动作中的启动时间早于老师。`
+  if (issue.type === 'insufficient_amplitude') return `${issue.bodyPartLabel}的运动范围小于老师对应动作。`
+  if (issue.type === 'end_position_jitter') return '用户在动作结束位置仍有额外位移，老师的停顿更稳定。'
+  if (issue.type === 'torso_instability') return '用户躯干方向的波动比老师对应片段更明显。'
+  return '对齐后的肩、髋和膝部轮廓与老师对应动作存在明显差异。'
+}
+
+function buildTrackingGaps(analysis) {
+  return ['teacher', 'user'].flatMap((videoRole) => {
+    return (analysis.tracking?.[videoRole]?.lostIntervals || []).map((gap) => ({
+      videoRole,
+      startTime: Number(Math.max(0, gap.startTime).toFixed(2)),
+      endTime: Number(Math.max(gap.startTime + 0.01, gap.endTime).toFixed(2)),
+      reasonCode: 'target_lost',
+      recoveryActions: ['reselect_subject', 'recalibrate', 'replace_video'],
+      message: `${videoRole === 'teacher' ? '老师' : '用户'}视频在这一段未稳定识别到完整身体`,
+    }))
+  })
+}
+
+function createReportId(prefix) {
+  return `${prefix}_${globalThis.crypto?.randomUUID?.() || Date.now()}`
 }
 
 export {

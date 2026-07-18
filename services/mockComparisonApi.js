@@ -1,8 +1,10 @@
+import { assertValidReport, REPORT_SCHEMA_VERSION } from './reportSchema.js'
+
 const PROCESSING_STEPS = [
-  { key: 'upload', label: '读取两段视频', detail: '正在检查本次选择的本地视频' },
-  { key: 'transcode', label: '检查视频兼容性', detail: '确认当前浏览器能够读取完整画面' },
+  { key: 'upload', label: '上传两段视频', detail: '视频已安全上传到本次匿名任务' },
+  { key: 'transcode', label: '统一视频格式', detail: '视频已统一为 H.264 + AAC MP4' },
   { key: 'alignment', label: '自动对齐音乐', detail: '以老师视频的音乐和时间轴为基准' },
-  { key: 'subject', label: '识别目标人物', detail: '确认本次需要持续跟踪的人物' },
+  { key: 'subject', label: '确认目标人物', detail: '自动锁定主要人物，复杂画面可手动框选' },
 ]
 
 const ANALYSIS_STEPS = [
@@ -12,6 +14,7 @@ const ANALYSIS_STEPS = [
 ]
 
 const MOCK_REPORT = {
+  schemaVersion: REPORT_SCHEMA_VERSION,
   id: 'report_demo_001',
   title: '这一遍最明显的问题，是 Wave 到腰胯时断了一下',
   aiSummary: '你的肩胸方向已经很清楚，节奏也基本跟上了。最值得先修的是 8 秒到 11 秒这段：力量到胸口后停住，腰胯没有继续接上。先把这一小段连顺，整段的流动感会明显提升。',
@@ -141,9 +144,12 @@ async function analyzeComparison({ scenario = 'standard', signal, onProgress = (
       recoveryActions: ['重新选择目标人物', '重新校准', '更换视频'],
     }]
     report.mismatches = report.mismatches.filter((item) => item.id !== 'issue_arm')
+    report.mismatches.forEach((item, index) => {
+      item.priority = index + 1
+    })
   }
 
-  return report
+  return assertValidReport(report)
 }
 
 function cancelTask(controller) {

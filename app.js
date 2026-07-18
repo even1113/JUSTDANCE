@@ -12,12 +12,16 @@ import {
 import {
   ANALYSIS_STEPS,
   PROCESSING_STEPS,
-  analyzeComparison,
+  analyzeComparison as analyzeMockComparison,
   cancelTask,
-  createComparisonSession,
-  deleteSessionData,
+  createComparisonSession as createMockComparisonSession,
+  deleteSessionData as deleteMockSessionData,
   processVideos,
 } from './services/mockComparisonApi.js'
+import { createComparisonApiClient } from './services/comparisonApiClient.js'
+import { runPoseComparison } from './services/poseExtractor.js'
+import { buildStructuredAnalysisForModel } from './services/feedbackGenerator.js'
+import { assertValidStructuredAnalysis } from './services/structuredAnalysisSchema.js'
 import {
   poseFigure,
   renderCandidateCard,
@@ -25,9 +29,20 @@ import {
 } from './components/uiComponents.js'
 
 const REVIEW_MODE = new URLSearchParams(window.location.search).get('review') === '1'
+  || window.location.hostname.endsWith('.github.io')
+const comparisonApi = createComparisonApiClient()
 const DEMO_DURATION = 32
 const VIDEO_METADATA_TIMEOUT_MS = 20000
 const DEFAULT_CROP_RECT = { x: 0.28, y: 0.08, width: 0.44, height: 0.84 }
+const UPLOAD_STATUS_COPY = {
+  validating: '正在校验',
+  initializing: '正在准备上传',
+  uploading: '正在上传',
+  uploaded: '等待处理',
+  transcoding: '正在统一格式',
+  ready: '✓ 已准备好',
+  error: '处理失败',
+}
 const FLOW_INDEX = {
   upload: 0,
   processing: 1,
@@ -43,6 +58,8 @@ const state = createInitialAppState()
 const teacherVideoRef = { current: null }
 const userVideoRef = { current: null }
 let activeController = null
+let sessionPromise = null
+const uploadControllers = new Map()
 let pendingConfirmation = null
 let toastTimer = null
 let demoTimer = null
@@ -182,7 +199,10 @@ function renderUploadState() {
   for (const role of ['teacher', 'user']) renderUploadCard(role)
   const ready = canStartProcessing(state)
   elements.startProcessing.disabled = !ready
-  elements.startProcessing.textContent = ready ? '自动准备两段视频' : '请先添加两段视频'
+  const hasBoth = Boolean(state.videos.teacher && state.videos.user)
+  elements.startProcessing.textContent = ready
+    ? '自动准备两段视频'
+    : hasBoth ? '视频正在上传和统一格式' : '请先添加两段视频'
 }
 
 function renderUploadCard(role) {
@@ -194,8 +214,10 @@ function renderUploadCard(role) {
   const video = preview.querySelector('video')
   const demoPose = preview.querySelector('[data-demo-pose]')
   const fieldMessage = card.querySelector('.field-message')
+  const progress = card.querySelector('.upload-progress')
+  const statusNote = preview.querySelector('.upload-success-note')
 
-  status.textContent = asset ? '✓ 上传成功' : '未添加'
+  status.textContent = asset ? (UPLOAD_STATUS_COPY[asset.processingStatus] || '已选择') : '未添加'
   card.classList.toggle('is-uploaded', Boolean(asset))
   card.classList.remove('has-error')
   dropzone.classList.toggle('hidden', Boolean(asset))
@@ -207,8 +229,14 @@ function renderUploadCard(role) {
     video.removeAttribute('src')
     video.load()
     demoPose.classList.add('hidden')
+    progress.classList.add('hidden')
     return
   }
+
+  const uploadPercent = Math.max(0, Math.min(100, Number(asset.uploadProgress) || 0))
+  progress.value = uploadPercent
+  progress.classList.toggle('hidden', asset.source === 'demo' || ['ready', 'error'].includes(asset.processingStatus))
+  statusNote.textContent = asset.processingStatus === 'ready' ? '✓ 已准备好' : (UPLOAD_STATUS_COPY[asset.processingStatus] || '正在准备')
 
   preview.querySelector('.upload-file-copy strong').textContent = asset.name
   preview.querySelector('.upload-file-copy small').textContent = `${formatFileSize(asset.size)} · ${formatDuration(asset.duration)}`
@@ -275,13 +303,86 @@ async function loadVideoFile(role, file) {
       width: metadata.width,
       height: metadata.height,
       url,
+      processingStatus: REVIEW_MODE ? 'ready' : 'validating',
+      uploadProgress: REVIEW_MODE ? 100 : 0,
     }
     renderUploadState()
-    showToast(`${role === 'teacher' ? '老师' : '我的'}视频已添加`)
+    if (REVIEW_MODE) {
+      showToast(`${role === 'teacher' ? '老师' : '我的'}视频已添加`)
+    } else {
+      await uploadSelectedVideo(role, state.videos[role])
+    }
   } catch (error) {
     URL.revokeObjectURL(url)
     setFieldError(role, error.userMessage || '无法读取这个视频，请重新选择 MP4 或 MOV。')
   }
+}
+
+async function uploadSelectedVideo(role, asset) {
+  uploadControllers.get(role)?.abort()
+  const controller = new AbortController()
+  uploadControllers.set(role, controller)
+
+  try {
+    const session = await ensureComparisonSession()
+    const video = await comparisonApi.uploadVideo({
+      sessionId: session.sessionId,
+      token: session.token,
+      role,
+      file: asset.file,
+      signal: controller.signal,
+      onProgress(progress) {
+        if (state.videos[role] !== asset) return
+        asset.processingStatus = progress.stage
+        if (Number.isFinite(progress.loaded) && Number.isFinite(progress.total) && progress.total > 0) {
+          asset.uploadProgress = Math.round((progress.loaded / progress.total) * 100)
+        }
+        if (progress.video) {
+          asset.serverId = progress.video.id
+          asset.serverMetadata = progress.video.metadata
+        }
+        renderUploadState()
+      },
+    })
+    if (state.videos[role] !== asset) return
+    asset.serverId = video.id
+    asset.playbackUrl = video.playbackUrl
+    asset.serverMetadata = video.metadata
+    asset.processingStatus = 'ready'
+    asset.uploadProgress = 100
+    asset.duration = Number(video.metadata?.durationSec) || asset.duration
+    asset.width = Number(video.metadata?.width) || asset.width
+    asset.height = Number(video.metadata?.height) || asset.height
+    asset.message = ''
+    renderUploadState()
+    showToast(`${role === 'teacher' ? '老师' : '我的'}视频已上传并完成格式处理`)
+  } catch (error) {
+    if (error.name === 'AbortError' || state.videos[role] !== asset) return
+    asset.processingStatus = 'error'
+    asset.message = error.message || '视频上传或处理失败，请重新选择。'
+    renderUploadState()
+    showToast(asset.message, 'error')
+  } finally {
+    if (uploadControllers.get(role) === controller) uploadControllers.delete(role)
+  }
+}
+
+async function ensureComparisonSession() {
+  if (state.sessionId && state.sessionToken) {
+    return { sessionId: state.sessionId, token: state.sessionToken }
+  }
+  if (!sessionPromise) {
+    sessionPromise = comparisonApi.createSession()
+      .then((session) => {
+        state.sessionId = session.sessionId
+        state.sessionToken = session.token
+        return session
+      })
+      .finally(() => {
+        sessionPromise = null
+      })
+  }
+  return sessionPromise
 }
 
 function setFieldError(role, message) {
@@ -293,12 +394,18 @@ function setFieldError(role, message) {
 }
 
 function loadDemoAssets() {
+  if (!REVIEW_MODE) {
+    const url = new URL(window.location.href)
+    url.searchParams.set('review', '1')
+    window.location.assign(url)
+    return
+  }
   revokeAllAssetUrls()
   state.videos.teacher = {
-    role: 'teacher', source: 'demo', name: '老师示范 · Wave 组合.mp4', size: 18.4 * 1024 * 1024, duration: 32,
+    role: 'teacher', source: 'demo', name: '老师示范 · Wave 组合.mp4', size: 18.4 * 1024 * 1024, duration: 32, processingStatus: 'ready',
   }
   state.videos.user = {
-    role: 'user', source: 'demo', name: '我的练习 · 第 3 遍.mp4', size: 21.7 * 1024 * 1024, duration: 32,
+    role: 'user', source: 'demo', name: '我的练习 · 第 3 遍.mp4', size: 21.7 * 1024 * 1024, duration: 32, processingStatus: 'ready',
   }
   renderUploadState()
   showToast('演示素材已准备好，可以开始体验')
@@ -316,32 +423,37 @@ async function startProcessing() {
   activeController = new AbortController()
 
   try {
-    const session = await createComparisonSession(state.videos)
-    state.sessionId = session.sessionId
-    const result = await processVideos({
-      scenario: state.scenario,
-      signal: activeController.signal,
-      onProgress(progress) {
-        state.processingSteps = progress
-        renderStepper(elements.processingStepper, progress)
-        const activeStep = progress.steps.find((step) => step.key === progress.active)
-        elements.processingMessage.textContent = activeStep?.detail || '两段视频已经准备完成'
-      },
-    })
-
-    state.alignment = await resolveAlignment(result.alignment)
-    state.subjectStep = 'teacher'
-    state.subjectSelections = result.needsSubjectSelection
-      ? { teacher: null, user: null }
-      : { teacher: 'person-main', user: 'person-main' }
-
-    if (result.needsSubjectSelection) {
-      renderSubjectSelection()
-      setStage('subject-selection')
-    } else if (state.alignment.status === 'manual-required') {
-      prepareManualAlignment()
+    if (REVIEW_MODE) {
+      const session = await createMockComparisonSession(state.videos)
+      state.sessionId = session.sessionId
+      const result = await processVideos({
+        scenario: state.scenario,
+        signal: activeController.signal,
+        onProgress(progress) {
+          state.processingSteps = progress
+          renderStepper(elements.processingStepper, progress)
+          const activeStep = progress.steps.find((step) => step.key === progress.active)
+          elements.processingMessage.textContent = activeStep?.detail || '两段视频已经准备完成'
+        },
+      })
+      await finishVideoPreparation(result)
     } else {
-      setStage('ready')
+      await ensureComparisonSession()
+      state.processingSteps = {
+        active: 'alignment',
+        completed: ['upload', 'transcode'],
+        steps: PROCESSING_STEPS,
+      }
+      renderStepper(elements.processingStepper, state.processingSteps)
+      elements.processingMessage.textContent = '正在以老师视频音轨为基准寻找共同动作区间'
+      const alignment = await resolveAlignment({ status: 'ready', offsetSec: 0 })
+      const completed = alignment.status === 'manual-required'
+        ? ['upload', 'transcode']
+        : ['upload', 'transcode', 'alignment']
+      state.processingSteps = { active: 'subject', completed, steps: PROCESSING_STEPS }
+      renderStepper(elements.processingStepper, state.processingSteps)
+      elements.processingMessage.textContent = '请选择自动锁定主要人物，复杂画面可手动框选'
+      await finishVideoPreparation({ alignment, needsSubjectSelection: true })
     }
   } catch (error) {
     if (error.name === 'AbortError') return
@@ -350,6 +462,25 @@ async function startProcessing() {
     setStage('blocking-error')
   } finally {
     activeController = null
+  }
+}
+
+async function finishVideoPreparation(result) {
+  state.alignment = result.alignment?.timeline
+    ? result.alignment
+    : await resolveAlignment(result.alignment)
+  state.subjectStep = 'teacher'
+  state.subjectSelections = result.needsSubjectSelection
+    ? { teacher: null, user: null }
+    : { teacher: 'automatic', user: 'automatic' }
+
+  if (result.needsSubjectSelection) {
+    renderSubjectSelection()
+    setStage('subject-selection')
+  } else if (state.alignment.status === 'manual-required') {
+    prepareManualAlignment()
+  } else {
+    setStage('ready')
   }
 }
 
@@ -389,19 +520,31 @@ function renderSubjectSelection() {
   const selected = state.subjectSelections[role]
   const selectedId = getSubjectSelectionId(selected)
   const asset = state.videos[role]
-  elements.subjectDescription.textContent = isTeacher
-    ? '老师视频里检测到多人，请选择本次需要跟踪的示范者。'
-    : '我的视频里也检测到多人，请选择你自己。后续只分析这个人。'
+  elements.subjectDescription.textContent = REVIEW_MODE
+    ? (isTeacher
+        ? '老师视频里检测到多人，请选择本次需要跟踪的示范者。'
+        : '我的视频里也检测到多人，请选择你自己。后续只分析这个人。')
+    : (isTeacher
+        ? '默认自动锁定老师视频中的主要人物；多人或遮挡场景建议手动框选。'
+        : '默认自动锁定练习视频中的主要人物；多人或遮挡场景建议手动框选自己。')
   elements.subjectStepLabel.textContent = isTeacher ? '第 1 步，共 2 步' : '第 2 步，共 2 步'
   document.querySelectorAll('.selection-progress i').forEach((item, index) => item.classList.toggle('active', index <= (isTeacher ? 0 : 1)))
   elements.subjectFrame.innerHTML = renderSubjectFrame({ asset, role, isTeacher, selected })
-  elements.candidateGrid.innerHTML = [0, 1, 2].map((index) => renderCandidateCard({
-    id: `person-${index + 1}`,
-    role,
-    index,
-    selected: selectedId === `person-${index + 1}`,
-    label: index === 1 ? '画面中央' : `人物 ${index + 1}`,
-  })).join('')
+  elements.candidateGrid.innerHTML = REVIEW_MODE
+    ? [0, 1, 2].map((index) => renderCandidateCard({
+        id: `person-${index + 1}`,
+        role,
+        index,
+        selected: selectedId === `person-${index + 1}`,
+        label: index === 1 ? '画面中央' : `人物 ${index + 1}`,
+      })).join('')
+    : renderCandidateCard({
+        id: 'automatic',
+        role,
+        index: 1,
+        selected: selectedId === 'automatic',
+        label: '自动锁定主要人物',
+      })
   elements.confirmSubject.disabled = !selected
   elements.confirmSubject.textContent = selected ? (isTeacher ? '确认老师人物' : '确认是我') : '请选择一位人物'
 
@@ -701,7 +844,9 @@ function renderWorkspace() {
     if (asset?.source === 'local') {
       video.classList.remove('hidden')
       demoPose.classList.add('hidden')
-      if (video.src !== asset.url) video.src = asset.url
+      const playbackUrl = asset.playbackUrl || asset.url
+      if (asset.playbackUrl) video.crossOrigin = 'anonymous'
+      if (video.src !== playbackUrl) video.src = playbackUrl
     } else {
       video.classList.add('hidden')
       demoPose.classList.remove('hidden')
@@ -860,14 +1005,7 @@ async function startAnalysis() {
   activeController = new AbortController()
 
   try {
-    state.report = await analyzeComparison({
-      scenario: state.scenario,
-      signal: activeController.signal,
-      onProgress(progress) {
-        state.analysisSteps = progress
-        renderStepper(elements.analysisStepper, progress)
-      },
-    })
+    state.report = await runAnalysis(activeController.signal)
     state.activeMismatchIndex = 0
     state.commonTime = state.report.mismatches[0]?.startTime || 0
     renderReport()
@@ -878,8 +1016,84 @@ async function startAnalysis() {
     elements.blockingErrorMessage.textContent = state.error
     setStage('blocking-error')
   } finally {
+    state.analysisTaskId = null
     activeController = null
   }
+}
+
+async function runAnalysis(signal) {
+  if (REVIEW_MODE) {
+    return analyzeMockComparison({
+      scenario: state.scenario,
+      signal,
+      onProgress: renderAnalysisProgress,
+    })
+  }
+
+  renderAnalysisProgress({ active: 'pose', completed: [], steps: ANALYSIS_STEPS })
+  const poseAnalysis = await runPoseComparison({
+    teacherVideo: elements.teacherCompareVideo,
+    userVideo: elements.userCompareVideo,
+    teacherCanvas: null,
+    userCanvas: null,
+    cropInfo: analysisCropFor('user'),
+    subjectSelections: {
+      teacher: analysisCropFor('teacher'),
+      user: analysisCropFor('user'),
+    },
+    audioAlignment: state.alignment,
+    signal,
+    onProgress() {
+      renderAnalysisProgress({ active: 'pose', completed: [], steps: ANALYSIS_STEPS })
+    },
+  })
+  state.poseAnalysis = poseAnalysis
+  const structuredAnalysis = assertValidStructuredAnalysis(buildStructuredAnalysisForModel(poseAnalysis))
+  renderAnalysisProgress({ active: 'difference', completed: ['pose'], steps: ANALYSIS_STEPS })
+
+  return comparisonApi.startAnalysis({
+    sessionId: state.sessionId,
+    token: state.sessionToken,
+    inputVersion: state.taskVersion,
+    sharedDurationSec: getComparisonDuration(),
+    structuredAnalysis,
+    signal,
+    onTaskCreated(analysis) {
+      state.analysisTaskId = analysis.id
+    },
+    onStatus(analysis) {
+      renderAnalysisProgress(mapApiAnalysisProgress(analysis))
+      elements.analysisFallback.classList.toggle('hidden', analysis.status !== 'fallback')
+    },
+  })
+}
+
+function analysisCropFor(role) {
+  const selection = state.subjectSelections[role]
+  return selection?.mode === 'manual' ? getNormalizedSubjectRect(selection) : null
+}
+
+function renderAnalysisProgress(progress) {
+  state.analysisSteps = progress
+  renderStepper(elements.analysisStepper, progress)
+}
+
+function mapApiAnalysisProgress(analysis) {
+  const completed = []
+  let active = 'pose'
+
+  if (analysis.stage === 'structured_analysis') {
+    completed.push('pose')
+    active = 'difference'
+  } else if (analysis.stage === 'model_summarizing') {
+    completed.push('pose', 'difference')
+    active = 'coach'
+  } else if (analysis.status === 'success' || analysis.status === 'fallback') {
+    completed.push('pose', 'difference', 'coach')
+    active = null
+  }
+
+  return { active, completed, steps: ANALYSIS_STEPS }
 }
 
 function renderReport() {
@@ -928,7 +1142,7 @@ function requestReplaceVideo(role) {
     danger: false,
     onConfirm() {
       abortActiveTask()
-      clearResults()
+      clearResults({ preserveSession: true })
       removeVideo(role)
       setStage('upload')
       getVideoInput(role).click()
@@ -937,7 +1151,13 @@ function requestReplaceVideo(role) {
 }
 
 function removeVideo(role) {
-  revokeAssetUrl(state.videos[role])
+  const asset = state.videos[role]
+  uploadControllers.get(role)?.abort()
+  uploadControllers.delete(role)
+  if (!REVIEW_MODE && asset?.serverId && state.sessionToken) {
+    comparisonApi.deleteVideo(asset.serverId, state.sessionToken).catch(() => {})
+  }
+  revokeAssetUrl(asset)
   state.videos[role] = null
   getVideoInput(role).value = ''
   renderUploadState()
@@ -951,7 +1171,7 @@ function requestReturnUpload() {
     danger: false,
     onConfirm() {
       abortActiveTask()
-      clearResults()
+      clearResults({ preserveSession: true })
       setStage('upload')
     },
   })
@@ -967,10 +1187,16 @@ function requestDeleteData() {
     async onConfirm() {
       elements.confirmAction.disabled = true
       elements.confirmAction.textContent = '正在删除…'
-      await deleteSessionData(state.sessionId)
-      resetAllData()
-      closeConfirmation()
-      showToast('本次数据已删除')
+      try {
+        await deleteCurrentSessionData()
+        resetAllData()
+        closeConfirmation()
+        showToast('本次数据已删除')
+      } catch (error) {
+        elements.confirmAction.disabled = false
+        elements.confirmAction.textContent = '重新删除'
+        showToast(error.message || '删除失败，请稍后重试', 'error')
+      }
     },
   })
 }
@@ -1015,14 +1241,20 @@ function showToast(message, type = 'success') {
   toastTimer = window.setTimeout(() => elements.toast.classList.add('hidden'), 3200)
 }
 
-function clearResults() {
+function clearResults(options = {}) {
   stopPlayback()
-  state.sessionId = null
+  if (!options.preserveSession) {
+    state.sessionId = null
+    state.sessionToken = null
+    sessionPromise = null
+  }
+  state.analysisTaskId = null
   state.subjectSelections = { teacher: null, user: null }
   state.subjectStep = 'teacher'
   state.alignment = null
   state.manualAnchors = { teacher: null, user: null }
   state.report = null
+  state.poseAnalysis = null
   state.activeMismatchIndex = -1
   state.commonTime = 0
   state.error = null
@@ -1030,6 +1262,9 @@ function clearResults() {
 
 function resetAllData() {
   abortActiveTask()
+  for (const controller of uploadControllers.values()) controller.abort()
+  uploadControllers.clear()
+  sessionPromise = null
   revokeAllAssetUrls()
   const scenario = state.scenario
   Object.assign(state, createInitialAppState(), { scenario })
@@ -1043,9 +1278,20 @@ function resetAllData() {
 }
 
 function abortActiveTask() {
+  const taskId = state.analysisTaskId
+  const sessionToken = state.sessionToken
   cancelTask(activeController)
   activeController = null
+  state.analysisTaskId = null
+  if (!REVIEW_MODE && taskId && sessionToken) {
+    comparisonApi.cancelAnalysis(taskId, sessionToken).catch(() => {})
+  }
   stopPlayback()
+}
+
+function deleteCurrentSessionData() {
+  if (REVIEW_MODE || !state.sessionToken) return deleteMockSessionData(state.sessionId)
+  return comparisonApi.deleteSession(state.sessionId, state.sessionToken)
 }
 
 function revokeAllAssetUrls() {

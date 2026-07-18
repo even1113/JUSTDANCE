@@ -1,8 +1,8 @@
-import { FilesetResolver, PoseLandmarker } from '@mediapipe/tasks-vision'
+import { FilesetResolver, PoseLandmarker } from '../vendor/mediapipe/vision_bundle.mjs'
 
 const MEDIAPIPE_VERSION = '0.10.35'
-const VISION_WASM_BASE = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}/wasm`
-const POSE_MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task'
+const VISION_WASM_BASE = new URL('../vendor/mediapipe/wasm', import.meta.url).href
+const POSE_MODEL_URL = new URL('../vendor/mediapipe/pose_landmarker_lite.task', import.meta.url).href
 
 let visionFilesetPromise = null
 

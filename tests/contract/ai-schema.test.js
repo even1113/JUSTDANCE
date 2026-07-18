@@ -1,96 +1,57 @@
-import { readFileSync } from "fs";
-import { resolve } from "path";
+import { describe, expect, test } from 'vitest'
+import { createRuleReport } from '../../services/ruleReport.js'
+import { validateStructuredAnalysis } from '../../services/structuredAnalysisSchema.js'
+import { validateReport } from '../../services/reportSchema.js'
+import { createStructuredAnalysisFixture } from '../fixtures/structured-analysis.js'
 
-function extractPoolFromAiJs(name) {
-  const aiJs = readFileSync(resolve(__dirname, "../../ai.js"), "utf-8");
-  const startPattern = `const ${name} = [`;
-  const startIdx = aiJs.indexOf(startPattern);
-  if (startIdx === -1) throw new Error(`${name} not found in ai.js`);
+describe('AI input and report contracts', () => {
+  test('accepts the structured action analysis sent to the model', () => {
+    const result = validateStructuredAnalysis(createStructuredAnalysisFixture())
 
-  let depth = 0;
-  let endIdx = -1;
-  for (let i = startIdx + startPattern.length - 1; i < aiJs.length; i++) {
-    if (aiJs[i] === "[") depth++;
-    else if (aiJs[i] === "]") {
-      depth--;
-      if (depth === 0) {
-        endIdx = i;
-        break;
-      }
-    }
-  }
+    expect(result.valid).toBe(true)
+    expect(result.errors).toEqual([])
+  })
 
-  if (endIdx === -1) throw new Error(`Could not find end of ${name}`);
-  const str = aiJs.slice(startIdx + startPattern.length - 1, endIdx + 1);
-  return (0, eval)(`(${str})`);
-}
+  test('rejects raw pose and video data from the model payload', () => {
+    const unsafe = createStructuredAnalysisFixture()
+    unsafe.videoUrl = 'https://example.invalid/private-video.mp4'
+    unsafe.issues[0].keypoints = [{ x: 0.5, y: 0.5 }]
 
-describe("AI Schema Contract Test", () => {
-  let mismatchPool;
-  let summaryTemplates;
-  let drillStepPool;
-  let reviewAdvicePool;
+    const result = validateStructuredAnalysis(unsafe)
 
-  beforeAll(() => {
-    mismatchPool = extractPoolFromAiJs("mismatchPool");
-    summaryTemplates = extractPoolFromAiJs("summaryTemplates");
-    drillStepPool = extractPoolFromAiJs("drillStepPool");
-    reviewAdvicePool = extractPoolFromAiJs("reviewAdvicePool");
-  });
+    expect(result.valid).toBe(false)
+    expect(result.errors.some((error) => error.includes('videoUrl'))).toBe(true)
+    expect(result.errors.some((error) => error.includes('keypoints'))).toBe(true)
+  })
 
-  test("mismatchPool is non-empty array", () => {
-    expect(Array.isArray(mismatchPool)).toBe(true);
-    expect(mismatchPool.length).toBeGreaterThanOrEqual(1);
-  });
+  test('turns trusted structured evidence into a Report v1 fallback', () => {
+    const analysis = createStructuredAnalysisFixture()
+    const report = createRuleReport(analysis, { id: 'report_contract' })
+    const result = validateReport(report, { sharedDurationSec: analysis.durationSec })
 
-  test("each mismatch pool item has required fields", () => {
-    mismatchPool.forEach((item, i) => {
-      expect(Array.isArray(item.titles), `mismatchPool[${i}].titles`).toBe(true);
-      expect(item.titles.length, `mismatchPool[${i}].titles non-empty`).toBeGreaterThan(0);
-      expect(typeof item.teacher, `mismatchPool[${i}].teacher`).toBe("string");
-      expect(item.teacher.length, `mismatchPool[${i}].teacher non-empty`).toBeGreaterThan(0);
-      expect(typeof item.user, `mismatchPool[${i}].user`).toBe("string");
-      expect(item.user.length, `mismatchPool[${i}].user non-empty`).toBeGreaterThan(0);
-      expect(typeof item.advice, `mismatchPool[${i}].advice`).toBe("string");
-      expect(item.advice.length, `mismatchPool[${i}].advice non-empty`).toBeGreaterThan(0);
-    });
-  });
+    expect(result.valid).toBe(true)
+    expect(report.mismatches).toHaveLength(1)
+    expect(report.mismatches[0].startTime).toBe(5.2)
+    expect(JSON.stringify(report)).not.toContain('keypoints')
+  })
 
-  test("summaryTemplates is non-empty array of strings", () => {
-    expect(Array.isArray(summaryTemplates)).toBe(true);
-    expect(summaryTemplates.length).toBeGreaterThanOrEqual(1);
-    summaryTemplates.forEach((s, i) => {
-      expect(typeof s, `summaryTemplates[${i}]`).toBe("string");
-      expect(s.length, `summaryTemplates[${i}] non-empty`).toBeGreaterThan(0);
-    });
-  });
+  test('keeps a short issue at the end of the video inside the shared timeline', () => {
+    const analysis = createStructuredAnalysisFixture({
+      issues: [{
+        type: 'end_position_jitter',
+        severity: 'medium',
+        bodyPart: 'torso',
+        bodyPartLabel: '重心',
+        startTime: 11.9,
+        endTime: 12,
+        evidence: { confidence: 0.8 },
+      }],
+    })
 
-  test("drillStepPool is non-empty array of strings", () => {
-    expect(Array.isArray(drillStepPool)).toBe(true);
-    expect(drillStepPool.length).toBeGreaterThanOrEqual(1);
-    drillStepPool.forEach((s, i) => {
-      expect(typeof s, `drillStepPool[${i}]`).toBe("string");
-      expect(s.length, `drillStepPool[${i}] non-empty`).toBeGreaterThan(0);
-    });
-  });
+    const report = createRuleReport(analysis)
+    const result = validateReport(report, { sharedDurationSec: analysis.durationSec })
 
-  test("reviewAdvicePool is non-empty array of strings", () => {
-    expect(Array.isArray(reviewAdvicePool)).toBe(true);
-    expect(reviewAdvicePool.length).toBeGreaterThanOrEqual(1);
-    reviewAdvicePool.forEach((s, i) => {
-      expect(typeof s, `reviewAdvicePool[${i}]`).toBe("string");
-      expect(s.length, `reviewAdvicePool[${i}] non-empty`).toBeGreaterThan(0);
-    });
-  });
-
-  test("buildMockReport function exists in ai.js", () => {
-    const aiJs = readFileSync(resolve(__dirname, "../../ai.js"), "utf-8");
-    expect(aiJs.includes("function buildReport")).toBe(true);
-  });
-
-  test("local motion comparison function exists in ai.js", () => {
-    const aiJs = readFileSync(resolve(__dirname, "../../ai.js"), "utf-8");
-    expect(aiJs.includes("async function analyzeMotionComparison")).toBe(true);
-    expect(aiJs.includes("function buildMotionReport")).toBe(true);
-  });
-});
+    expect(result.valid).toBe(true)
+    expect(report.mismatches[0].endTime).toBe(12)
+  })
+})

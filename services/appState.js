@@ -18,6 +18,9 @@ function createInitialAppState() {
   return {
     stage: 'upload',
     sessionId: null,
+    sessionToken: null,
+    analysisTaskId: null,
+    poseAnalysis: null,
     taskVersion: 0,
     scenario: 'standard',
     videos: { teacher: null, user: null },
@@ -69,8 +72,14 @@ function canStartProcessing(state) {
     state.videos.teacher
     && state.videos.user
     && !state.videos.teacher.playbackError
-    && !state.videos.user.playbackError,
+    && !state.videos.user.playbackError
+    && isVideoReady(state.videos.teacher)
+    && isVideoReady(state.videos.user),
   )
+}
+
+function isVideoReady(video) {
+  return !video.processingStatus || video.processingStatus === 'ready'
 }
 
 function canStartAnalysis(state) {

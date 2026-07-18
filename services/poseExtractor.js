@@ -14,6 +14,7 @@ async function runPoseComparison({
   cropInfo,
   subjectSelections,
   audioAlignment,
+  signal,
   onPoseFramesReady = () => {},
   onTrackingStatus = () => {},
   onProgress = () => {},
@@ -21,6 +22,7 @@ async function runPoseComparison({
   if (!teacherVideo || !userVideo) {
     throw new Error('请先添加老师视频和我的视频')
   }
+  throwIfAborted(signal)
 
   onProgress('正在加载 MediaPipe Pose Landmarker...')
 
@@ -37,9 +39,11 @@ async function runPoseComparison({
     cropRect: subjectSelections?.teacher || null,
     onTrackingStatus,
     onProgress,
+    signal,
   })
 
   const userCropRect = subjectSelections?.user || cropInfo || null
+  throwIfAborted(signal)
   onProgress(userCropRect ? '正在识别我的视频姿态（已锁定框选人物）...' : '正在识别我的视频姿态...')
   const userPoseFrames = await extractPoseFrames(userVideo, {
     label: '我的',
@@ -50,6 +54,7 @@ async function runPoseComparison({
     cropRect: userCropRect,
     onTrackingStatus,
     onProgress,
+    signal,
   })
 
   onPoseFramesReady({
@@ -98,6 +103,7 @@ async function extractPoseFrames(video, options = {}) {
     cropRect = null,
     onTrackingStatus = () => {},
     onProgress = () => {},
+    signal,
   } = options
 
   if (!video.requestVideoFrameCallback) {
@@ -152,6 +158,7 @@ async function extractPoseFrames(video, options = {}) {
     }
 
     const cleanup = async () => {
+      signal?.removeEventListener('abort', abort)
       video.removeEventListener('ended', finish)
       video.removeEventListener('error', failFromVideo)
       if (frameRequestId !== null && video.cancelVideoFrameCallback) {
@@ -203,6 +210,12 @@ async function extractPoseFrames(video, options = {}) {
       fail(new Error(`${label}视频读取失败，请重新选择视频。`))
     }
 
+    const abort = () => {
+      const error = new Error('动作分析已取消')
+      error.name = 'AbortError'
+      fail(error)
+    }
+
     const handleFrame = (_now, metadata) => {
       if (finished) return
 
@@ -245,11 +258,23 @@ async function extractPoseFrames(video, options = {}) {
 
     video.addEventListener('ended', finish)
     video.addEventListener('error', failFromVideo)
+    if (signal?.aborted) {
+      abort()
+      return
+    }
+    signal?.addEventListener('abort', abort, { once: true })
     frameRequestId = video.requestVideoFrameCallback(handleFrame)
     video.play().catch((error) => {
       fail(new Error(`${label}视频无法自动播放以进行逐帧识别：${error.message}`))
     })
   })
+}
+
+function throwIfAborted(signal) {
+  if (!signal?.aborted) return
+  const error = new Error('动作分析已取消')
+  error.name = 'AbortError'
+  throw error
 }
 
 function createPosePlaybackRenderer(video, canvas, frames, options = {}) {

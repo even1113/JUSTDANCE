@@ -1,0 +1,26 @@
+limit_req_zone $binary_remote_addr zone=api_limit:10m rate=10r/s;
+
+server {
+  listen 80;
+  server_name ${APP_DOMAIN};
+  client_max_body_size 2m;
+
+  location / {
+    proxy_pass http://api:5173;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 90s;
+  }
+
+  location /api/ {
+    limit_req zone=api_limit burst=30 nodelay;
+    proxy_pass http://api:5173;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 90s;
+  }
+}

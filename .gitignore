@@ -8,11 +8,11 @@ vendor/mediapipe/vision_bundle.mjs
 vendor/mediapipe/wasm/
 dist/
 coverage/
-data/
-tmp/
-uploads/
-media/
-test-videos/
+/data/
+/tmp/
+/uploads/
+/media/
+/test-videos/
 *.mp4
 *.mov
 *.m4a

@@ -20,7 +20,7 @@
   - _Requirements: 2.1, 2.3–2.4, 5.1–5.4, 7.2–7.4_
 
 - [x] 3. 接入 H5 API client
-  - 将 `mockComparisonApi.js` 隔离为 provider。
+  - 将浏览器端调用与受控 API Client 解耦，不在正式入口保留 Mock provider。
   - 使用 API client 驱动会话、轮询、取消和删除。
   - 保留本地 Demo 模式用于视觉评审，不与正式模式混淆。
   - _Requirements: 2, 5, 7_

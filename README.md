@@ -2,7 +2,7 @@
 
 DanceMirror 是一个无登录、即来即用的 H5 舞蹈视频复盘助手。用户上传老师示范和自己的练习视频，系统统一视频格式、对齐音乐、锁定目标人物，找出最明显的动作差异并生成可执行的教练式建议。
 
-当前仓库已经从 Demo 进入真实实现阶段。`/?review=1` 只保留为显式视觉评审入口，普通入口使用真实上传、FFmpeg 转码、结构化动作分析、DeepSeek 和规则报告降级链路。
+当前仓库已经进入真实实现阶段，所有入口都使用真实上传、FFmpeg 转码、结构化动作分析、DeepSeek 和规则报告降级链路；演示素材与 Mock 场景入口已移除。
 
 ## 本地启动
 
@@ -15,6 +15,8 @@ npm run serve
 ```
 
 访问 `http://127.0.0.1:5173`。默认 `RUNTIME_MODE=embedded`，使用内存任务状态和 `data/` 下的本地磁盘，不依赖 Docker；重启后任务不会保留。
+
+浏览器端不读取 `API_BASE_URL` 或 Vite 变量，所有 API 与本地媒体上传都使用同源 `/api/...`。`PUBLIC_BASE_URL` 只描述服务对外地址，不参与本地存储签名 URL 的拼接。
 
 不要把 `.env`、真实测试视频或媒体临时文件提交到 Git。
 
@@ -34,7 +36,7 @@ docker compose ps
 - 24 小时数据清理进程；
 - 本地共享媒体卷。
 
-生产环境把 `STORAGE_DRIVER` 切换为 `oss`。阿里云部署步骤见 [docs/DEPLOY_ALIYUN.md](docs/DEPLOY_ALIYUN.md)。
+生产环境使用独立的 `deploy/.env.production`（模板为 `deploy/.env.production.example`），不要复用本地根目录 `.env`。阿里云部署步骤见 [docs/DEPLOY_ALIYUN.md](docs/DEPLOY_ALIYUN.md)。
 
 ## DeepSeek
 
@@ -102,7 +104,7 @@ tests/                             contract、unit、integration 测试
 - 自动多人代表帧候选尚未完成，当前支持自动主目标与双侧手动框选。
 - 首版音轨和姿态分析在浏览器执行，低端手机性能需要 3–5 组真实视频压测。
 - 当前开发机没有 Docker；容器配置尚需在具备 Docker 的机器完成运行验收。
-- 尚未购买 ECS、域名、OSS 等资源，因此暂无线上的部署地址。
+- 2026-07-21 已完成首次 ECS 部署；正式域名、HTTPS 与 OSS 迁移仍待完成。
 
 ## 文档
 

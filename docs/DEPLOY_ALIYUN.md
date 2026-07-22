@@ -1,7 +1,7 @@
-<!-- version: v0.1 | updated: 2026-07-18 -->
+<!-- version: v0.2 | updated: 2026-07-22 -->
 # DanceMirror 阿里云深圳 Beta 部署
 
-本文用于“尚未购买云资源”的准备阶段。当前仓库已经提供 Docker、Compose、Nginx、数据库迁移、Worker 和清理进程；只有实际购买 ECS、域名、OSS 并完成备案后，才执行线上部署和冒烟。
+DanceMirror 已于 2026-07-21 完成首次 ECS 部署。当前公网 IP 版本使用 `persistent + local`，用于首轮验证；正式 Beta 目标仍是私有 OSS、正式域名与 HTTPS。本文件同时覆盖当前单机本地存储更新和后续 OSS 生产形态。
 
 ## 1. 部署边界
 
@@ -120,22 +120,24 @@ Beta 目标容量是每天约 20–200 次任务，初期只部署：
 在 ECS 项目目录执行：
 
 ```bash
-cp deploy/.env.aliyun.example .env
-chmod 600 .env
+cp deploy/.env.production.example deploy/.env.production
+chmod 600 deploy/.env.production
 ```
 
-填入域名、随机数据库密码、至少 32 字符的媒体签名密钥、OSS RAM 凭证和 DeepSeek Key。
+填入公网地址、随机数据库密码、至少 32 字符的媒体签名密钥、存储配置和 DeepSeek Key。生产文件与本地根目录 `.env` 独立，禁止提交 Git。
 
 必须保持：
 
 ```text
 APP_NODE_ENV=production
-OSS_REGION=oss-cn-shenzhen
+PUBLIC_BASE_URL=https://你的正式域名
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-v4-flash
 DEEPSEEK_FALLBACK_MODEL=deepseek-v4-pro
 WORKER_CONCURRENCY=1 或 2
 ```
+
+当前单机部署使用 `STORAGE_DRIVER=local`；正式 OSS 形态使用 `STORAGE_DRIVER=oss` 并同时设置 `OSS_REGION`、`OSS_BUCKET` 和 RAM 凭证。浏览器 API 始终走同源 `/api/...`，local 模式的签名上传地址也必须保持相对路径。
 
 建议生成随机密钥：
 
@@ -151,10 +153,16 @@ openssl rand -hex 32
 sh deploy/scripts/deploy.sh
 ```
 
-等价命令：
+如果需要显式指定其他受控环境文件：
 
 ```bash
-docker compose --env-file .env \
+ENV_FILE=/secure/path/dancemirror.production.env sh deploy/scripts/deploy.sh
+```
+
+脚本默认等价命令：
+
+```bash
+docker compose --env-file deploy/.env.production \
   -f docker-compose.yml \
   -f deploy/docker-compose.aliyun.yml \
   up -d --build
@@ -162,12 +170,22 @@ docker compose --env-file .env \
 
 API 容器启动时先执行幂等数据库迁移；API healthy 后再启动 Worker 和 Cleanup。
 
+### 当前 local 存储部署更新
+
+首次公网版本使用宿主机 Nginx 与 `STORAGE_DRIVER=local` 时，还必须同步更新反向代理：
+
+1. 浏览器 API 请求保持同源 `/api/...`，不要设置前端 `API_BASE_URL`。
+2. local 存储签名上传目标必须是相对路径 `/api/storage/upload/...`；`PUBLIC_BASE_URL` 不参与该 URL 的生成。
+3. 将 `deploy/nginx/default.conf.template` 中 `/api/storage/upload/` 的独立 location 同步到实际宿主机 Nginx，保持 `client_max_body_size 500m`、`proxy_request_buffering off` 和 900 秒上传超时。
+4. 执行 Nginx 配置检查并平滑重载，再重新构建和启动 API/Worker/Cleanup。
+5. 创建诊断会话时，只核对上传 URL 的 scheme、host 和 path，不在日志或工单中输出 query、session token 或完整签名。
+
 ## 7. DNS、TLS 和备案后开放
 
 1. 备案完成前不要把未备案域名解析到中国内地 ECS 并对公众提供服务。
 2. 在 ALB/SLB 配置证书和 HTTPS 监听，将流量回源至 ECS 80。
 3. DNS A/CNAME 指向负载均衡或公网入口。
-4. 将 `.env` 的 `APP_DOMAIN` 设置为最终域名，重新部署。
+4. 将 `deploy/.env.production` 的 `APP_DOMAIN` 和 `PUBLIC_BASE_URL` 设置为最终域名，重新部署。
 5. 验证 H5、API 和 OSS 签名 URL 全部使用 HTTPS，页面不得出现 mixed content。
 
 如果不使用负载均衡，需要自行给 Nginx 增加 443 监听和证书挂载；当前模板只提供负载均衡 TLS 终止后的 HTTP 回源配置。
@@ -177,8 +195,8 @@ API 容器启动时先执行幂等数据库迁移；API healthy 后再启动 Wor
 按顺序验证：
 
 1. `GET /api/health/live` 返回 live。
-2. `GET /api/health/ready` 返回 persistent + oss。
-3. 上传一组仓库外短视频，OSS 中出现 `sessions/{id}/...` 私有对象。
+2. `GET /api/health/ready` 返回 `persistent + local`（当前单机）或 `persistent + oss`（正式目标），且与环境文件一致。
+3. 分别上传老师视频和练习视频；local 模式确认上传目标为同源 `/api/storage/upload/...`，OSS 模式确认私有 Bucket 中出现 `sessions/{id}/...` 对象。
 4. 两段视频变为 ready，转码元数据为 H.264 + AAC。
 5. 生成报告；Flash 正常时状态 success，暂时使用错误 Key 时状态 fallback 且仍有合法 Report v1。
 6. 手机播放签名 URL，并确认 URL 过期后无法继续访问。
@@ -225,4 +243,4 @@ npm run load-test:media -- \
 2. 数据库 migration 当前只新增表/索引，回滚应用时不删除数据结构。
 3. 将 Compose 镜像切回上一 tag，执行 `docker compose up -d`。
 4. 验证 health、旧任务读取、上传和删除。
-5. 禁止使用 `git reset --hard`、强制推送或直接覆盖生产 `.env`。
+5. 禁止使用 `git reset --hard`、强制推送或直接覆盖生产环境文件。

@@ -11,7 +11,6 @@ function createStorageAdapter(config) {
 
   return createLocalStorageAdapter({
     maxUploadBytes: config.media.maxVideoBytes,
-    publicBaseUrl: config.publicBaseUrl,
     rootDir: config.storage.localPath,
     signingSecret: config.storage.signingSecret,
     urlTtlSec: config.storage.urlTtlSec,

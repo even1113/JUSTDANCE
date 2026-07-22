@@ -6,7 +6,6 @@ import { signStorageRequest, verifyStorageRequest } from './storage-signature.js
 
 function createLocalStorageAdapter(options) {
   const rootDir = resolve(options.rootDir)
-  const publicBaseUrl = String(options.publicBaseUrl).replace(/\/$/, '')
   const signingSecret = options.signingSecret
   const urlTtlSec = options.urlTtlSec
   const maxUploadBytes = options.maxUploadBytes
@@ -158,7 +157,10 @@ function createLocalStorageAdapter(options) {
   function createSignedUrl(prefix, method, key) {
     const expires = Math.floor(Date.now() / 1000) + urlTtlSec
     const signature = signStorageRequest({ method, key, expires, secret: signingSecret })
-    return `${publicBaseUrl}${prefix}${encodeURIComponent(key)}?expires=${expires}&signature=${signature}`
+    // Local storage is served by the same application as the H5. Returning a
+    // relative URL keeps uploads on the page origin even when a reverse proxy
+    // or public IP is used, and avoids leaking a development PUBLIC_BASE_URL.
+    return `${prefix}${encodeURIComponent(key)}?expires=${expires}&signature=${signature}`
   }
 
   function resolveObjectPath(key) {

@@ -1,6 +1,7 @@
 .env
 .env.local
 .env.*.local
+deploy/.env.production
 .codex/
 .worktrees/
 node_modules/

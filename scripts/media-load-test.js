@@ -82,9 +82,10 @@ async function uploadVideo(session, role, filePath) {
     },
   })
   const blob = await openAsBlob(filePath, { type: contentType })
+  const uploadUrl = new URL(initiated.upload.url, `${baseUrl}/`).toString()
   let response
   try {
-    response = await fetch(initiated.upload.url, {
+    response = await fetch(uploadUrl, {
       method: initiated.upload.method || 'PUT',
       headers: initiated.upload.headers,
       body: blob,

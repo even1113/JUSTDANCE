@@ -16,7 +16,7 @@
 - `services/audioAlignment.js`：作为音轨算法 POC 和服务端实现的对照基线。
 - `services/subjectTracker.js`：复用目标不可信时“丢失而非换人”的规则。
 - `services/feedbackGenerator.js`：作为非大模型兜底报告生成器。
-- `services/mockComparisonApi.js`：保留为可替换 provider，不再作为最终网络边界。
+- `services/comparisonApiClient.js`：使用同源 API 作为唯一浏览器网络边界。
 - `components/DualVideoPlayer.js`：继续承担共享时间轴播放。
 
 ## Architecture

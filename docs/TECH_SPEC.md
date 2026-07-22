@@ -87,11 +87,14 @@ Redis / BullMQ ── Worker
 
 1. H5 使用老师音轨作为公共时间轴基准，自动对齐失败时接受手动 anchor。
 2. MediaPipe Pose Landmarker 从项目本地资源加载，不依赖运行时 CDN。
-3. 双侧 tracker 锁定同一目标；不可信时记录 tracking gap，不静默换人。
-4. H5 输出无评分的 `structuredAnalysis`，服务端再次运行时校验。
-5. Worker 先生成确定性的规则报告，再调用 DeepSeek 改写教练文案。
-6. Flash 失败后尝试 Pro；全部失败或输出无效时返回规则报告，任务状态为 `fallback`。
-7. 模型只能改变文案，不得改变问题数量、时间区间、严重度和证据。
+3. 浏览器逐帧采样整段视频，分别记录采样帧、模型检出帧和 tracker 有效帧；有效帧至少 8 帧且占采样帧 20%，允许短暂遮挡但不接受极低覆盖率。
+4. 双侧 tracker 锁定同一目标；不可信时记录 tracking gap，不静默换人。
+5. 姿态阶段使用稳定错误码区分 `pose_video_read_failed`、`pose_frame_extraction_failed`、`pose_model_load_failed`、`pose_not_detected` 和 `pose_insufficient_frames`，日志只记录角色、帧数、有效率和失败阶段。
+6. 对比播放默认开启老师音轨并静音用户音轨；用户可主动切换音频焦点，但同一时间只保留一个可听音轨。
+7. H5 输出无评分的 `structuredAnalysis`，服务端再次运行时校验。
+8. Worker 先生成确定性的规则报告，再调用 DeepSeek 改写教练文案。
+9. Flash 失败后尝试 Pro；全部失败或输出无效时返回规则报告，任务状态为 `fallback`。
+10. 模型只能改变文案，不得改变问题数量、时间区间、严重度和证据。
 
 ## 5. API
 

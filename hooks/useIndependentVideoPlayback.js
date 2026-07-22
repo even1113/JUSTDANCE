@@ -14,12 +14,17 @@ function createIndependentVideoPlayback({
   userVideoRef,
   onTimeUpdate = () => {},
   onPlaybackChange = () => {},
+  onAudioChange = () => {},
 }) {
   let alignment = null
   let playbackRate = 1
   let isPlaying = false
   let frameRequestId = null
   let cleanupFns = []
+  const audioState = {
+    teacherMuted: false,
+    userMuted: true,
+  }
 
   function refresh() {
     cleanupListeners()
@@ -30,7 +35,7 @@ function createIndependentVideoPlayback({
 
     teacher.controls = false
     user.controls = false
-    user.muted = true
+    applyAudioState()
     teacher.playsInline = true
     user.playsInline = true
 
@@ -42,6 +47,45 @@ function createIndependentVideoPlayback({
     ]
     applyPlaybackRates()
     publishTime()
+    publishAudioState()
+  }
+
+  function setMuted(role, muted) {
+    if (!['teacher', 'user'].includes(role)) return
+    const key = `${role}Muted`
+    audioState[key] = Boolean(muted)
+
+    if (!muted) {
+      const otherRole = role === 'teacher' ? 'user' : 'teacher'
+      audioState[`${otherRole}Muted`] = true
+    }
+
+    applyAudioState()
+    publishAudioState()
+  }
+
+  function toggleMuted(role) {
+    const key = `${role}Muted`
+    setMuted(role, !audioState[key])
+  }
+
+  function applyAudioState() {
+    const teacher = teacherVideoRef.current
+    const user = userVideoRef.current
+    if (teacher) {
+      teacher.muted = audioState.teacherMuted
+      teacher.defaultMuted = false
+      if (teacher.volume === 0) teacher.volume = 1
+    }
+    if (user) {
+      user.muted = audioState.userMuted
+      user.defaultMuted = true
+      if (user.volume === 0) user.volume = 1
+    }
+  }
+
+  function publishAudioState() {
+    onAudioChange({ ...audioState })
   }
 
   function setAlignment(nextAlignment) {
@@ -259,6 +303,9 @@ function createIndependentVideoPlayback({
     stepFrame,
     seekCommon,
     setPlaybackRate,
+    setMuted,
+    toggleMuted,
+    getAudioState: () => ({ ...audioState }),
     destroy,
   }
 }

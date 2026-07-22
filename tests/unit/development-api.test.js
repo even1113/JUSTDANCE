@@ -66,6 +66,42 @@ describe('development analysis API', () => {
     expect(response.status).toBe(403)
     expect(body.error.code).toBe('session_token_invalid')
   })
+
+  test('returns same-origin upload targets and replaces a failed role upload cleanly', async () => {
+    const testServer = await startTestServer()
+    const { origin } = testServer
+    servers.push(testServer)
+    const created = await (await fetch(`${origin}/api/sessions`, { method: 'POST' })).json()
+    const headers = {
+      Authorization: `Bearer ${created.token}`,
+      'Content-Type': 'application/json',
+    }
+    const createVideo = (role) => fetch(`${origin}/api/sessions/${created.session.id}/videos`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        role,
+        originalName: `${role}.mp4`,
+        contentType: 'video/mp4',
+        sizeBytes: 1024,
+      }),
+    }).then((response) => response.json())
+
+    const firstTeacher = await createVideo('teacher')
+    const retriedTeacher = await createVideo('teacher')
+    const user = await createVideo('user')
+
+    expect(firstTeacher.upload.url).toMatch(/^\/api\/storage\/upload\//)
+    expect(firstTeacher.upload.url).not.toContain('localhost')
+    expect(retriedTeacher.video.id).not.toBe(firstTeacher.video.id)
+    expect(user.upload.url).toMatch(/^\/api\/storage\/upload\//)
+
+    const session = await (await fetch(`${origin}/api/sessions/${created.session.id}`, {
+      headers: { Authorization: `Bearer ${created.token}` },
+    })).json()
+    expect(session.session.videos).toHaveLength(2)
+    expect(session.session.videos.find((video) => video.role === 'teacher').id).toBe(retriedTeacher.video.id)
+  })
 })
 
 async function waitForAnalysis(origin, taskId, headers) {

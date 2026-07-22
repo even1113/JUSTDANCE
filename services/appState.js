@@ -22,9 +22,9 @@ function createInitialAppState() {
     analysisTaskId: null,
     poseAnalysis: null,
     taskVersion: 0,
-    scenario: 'standard',
     videos: { teacher: null, user: null },
     processingSteps: [],
+    analysisTrace: [],
     subjectSelections: { teacher: null, user: null },
     subjectStep: 'teacher',
     alignment: null,
@@ -33,6 +33,7 @@ function createInitialAppState() {
     activeMismatchIndex: -1,
     commonTime: 0,
     error: null,
+    errorContext: null,
     isPlaying: false,
   }
 }

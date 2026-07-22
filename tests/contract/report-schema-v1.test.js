@@ -1,9 +1,17 @@
 import { describe, expect, test } from 'vitest'
-import { MOCK_REPORT } from '../../services/mockComparisonApi.js'
+import { createRuleReport } from '../../services/ruleReport.js'
 import { REPORT_SCHEMA_VERSION, assertValidReport, validateReport } from '../../services/reportSchema.js'
+import { createStructuredAnalysisFixture } from '../fixtures/structured-analysis.js'
 
 function createReport() {
-  return structuredClone(MOCK_REPORT)
+  const fixture = createStructuredAnalysisFixture()
+  const [primary] = fixture.issues
+  fixture.issues = [
+    primary,
+    { ...primary, type: 'insufficient_amplitude', severity: 'medium', bodyPart: 'right_wrist', bodyPartLabel: '右手臂', startTime: 7, endTime: 8 },
+    { ...primary, type: 'end_position_jitter', severity: 'low', bodyPart: 'torso', bodyPartLabel: '躯干', startTime: 9, endTime: 10 },
+  ]
+  return createRuleReport(fixture, { id: 'report_contract_fixture' })
 }
 
 describe('Report v1 contract', () => {

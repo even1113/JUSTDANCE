@@ -5,6 +5,9 @@ import { analyzeMovementMetrics } from './movementMetrics.js'
 import { createSubjectTracker } from './subjectTracker.js'
 
 const POSE_PLAYBACK_RATE = 1
+const MIN_VALID_POSE_FRAMES = 8
+const MIN_VALID_POSE_RATIO = 0.2
+const PROGRESS_INTERVAL_MS = 250
 
 async function runPoseComparison({
   teacherVideo,
@@ -24,12 +27,12 @@ async function runPoseComparison({
   }
   throwIfAborted(signal)
 
-  onProgress('正在加载 MediaPipe Pose Landmarker...')
+  onProgress({ stage: 'model', message: '正在加载 MediaPipe Pose Landmarker...' })
 
   const teacherHistory = []
   const userHistory = []
 
-  onProgress('正在识别老师视频的人体姿态...')
+  onProgress({ stage: 'pose', kind: 'teacher', message: '正在识别老师视频的人体姿态...' })
   const teacherPoseFrames = await extractPoseFrames(teacherVideo, {
     label: '老师',
     kind: 'teacher',
@@ -44,7 +47,11 @@ async function runPoseComparison({
 
   const userCropRect = subjectSelections?.user || cropInfo || null
   throwIfAborted(signal)
-  onProgress(userCropRect ? '正在识别我的视频姿态（已锁定框选人物）...' : '正在识别我的视频姿态...')
+  onProgress({
+    stage: 'pose',
+    kind: 'user',
+    message: userCropRect ? '正在识别我的视频姿态（已锁定框选人物）...' : '正在识别我的视频姿态...',
+  })
   const userPoseFrames = await extractPoseFrames(userVideo, {
     label: '我的',
     kind: 'user',
@@ -62,15 +69,15 @@ async function runPoseComparison({
     userFrames: userPoseFrames,
   })
 
-  onProgress('正在按音轨偏移裁剪两段视频的共同动作区间...')
+  onProgress({ stage: 'difference', message: '正在按音轨偏移裁剪两段视频的共同动作区间...' })
   const audioAligned = alignPoseFramesToAudio(
     teacherPoseFrames,
     userPoseFrames,
     audioAlignment,
   )
 
-  onProgress('正在做身体比例归一化、平滑和关键点补帧...')
-  onProgress('正在通过 DTW 对齐老师和我的动作序列...')
+  onProgress({ stage: 'difference', message: '正在做身体比例归一化、平滑和关键点补帧...' })
+  onProgress({ stage: 'difference', message: '正在通过 DTW 对齐老师和我的动作序列...' })
   const analysis = analyzeMovementMetrics(audioAligned.teacherFrames, audioAligned.userFrames)
 
   return {
@@ -85,6 +92,10 @@ async function runPoseComparison({
     poseFrameCounts: {
       teacher: teacherPoseFrames.length,
       user: userPoseFrames.length,
+    },
+    poseDiagnostics: {
+      teacher: teacherPoseFrames.diagnostics,
+      user: userPoseFrames.diagnostics,
     },
     tracking: {
       teacher: teacherPoseFrames.tracking,
@@ -107,7 +118,7 @@ async function extractPoseFrames(video, options = {}) {
   } = options
 
   if (!video.requestVideoFrameCallback) {
-    throw new Error('当前浏览器不支持 requestVideoFrameCallback，无法按视频帧进行姿态识别。')
+    throw createPoseError('pose_frame_extraction_failed', '当前浏览器不支持逐帧视频读取，无法进行姿态识别。')
   }
 
   const originalState = {
@@ -115,10 +126,19 @@ async function extractPoseFrames(video, options = {}) {
     muted: video.muted,
     playbackRate: video.playbackRate,
   }
-  await ensureVideoReady(video)
-  await seekVideo(video, 0)
+  try {
+    await ensureVideoReady(video)
+    await seekVideo(video, 0)
+  } catch (error) {
+    throw createPoseError('pose_video_read_failed', `${label}视频读取失败，请重新选择视频。`, error)
+  }
 
-  const landmarker = await createPoseLandmarker({ numPoses: 4 })
+  let landmarker
+  try {
+    landmarker = await createPoseLandmarker({ numPoses: 4 })
+  } catch (error) {
+    throw createPoseError('pose_model_load_failed', '姿态识别模型加载失败，请检查网络或模型资源后重试。', error)
+  }
   const tracker = createSubjectTracker({
     cropRect,
     videoWidth: video.videoWidth,
@@ -137,6 +157,36 @@ async function extractPoseFrames(video, options = {}) {
     let lastTimestampMs = -1
     let lostStart = null
     let lastTrackingStatus = null
+    let sampledFrames = 0
+    let detectedPoseFrames = 0
+    let lastProgressAt = 0
+
+    const diagnostics = (failureStage = null) => ({
+      sampledFrames,
+      detectedPoseFrames,
+      validPoseFrames: frames.length,
+      validPoseRatio: sampledFrames > 0 ? Number((frames.length / sampledFrames).toFixed(3)) : 0,
+      failureStage,
+    })
+
+    const reportProgress = (mediaTime, force = false) => {
+      const now = performance.now()
+      if (!force && now - lastProgressAt < PROGRESS_INTERVAL_MS) return
+      lastProgressAt = now
+      const duration = Number(video.duration) || 0
+      const progressPercent = duration > 0
+        ? Number(Math.min(100, Math.max(0, mediaTime / duration * 100)).toFixed(1))
+        : null
+      onProgress({
+        stage: 'pose',
+        kind,
+        message: `${label}视频正在逐帧识别：已检测 ${sampledFrames} 帧，有效姿态 ${frames.length} 帧。`,
+        sampledFrames,
+        detectedPoseFrames,
+        validPoseFrames: frames.length,
+        progressPercent,
+      })
+    }
 
     const updateTrackingStatus = (status, mediaTime) => {
       if (status === 'lost' && lostStart === null) lostStart = mediaTime
@@ -177,8 +227,11 @@ async function extractPoseFrames(video, options = {}) {
 
       cleanup()
         .then(() => {
-          if (frames.length === 0) {
-            reject(new Error(`${label}视频未检测到人体姿态，请确认人物完整入镜且光线清晰。`))
+          const result = validatePoseCoverage(diagnostics())
+          frames.diagnostics = diagnostics(result.code || null)
+          logPoseDiagnostics(kind, frames.diagnostics)
+          if (!result.ok) {
+            reject(createPoseError(result.code, `${label}${result.message}`))
             return
           }
           if (lostStart !== null) {
@@ -203,11 +256,15 @@ async function extractPoseFrames(video, options = {}) {
     const fail = (error) => {
       if (finished) return
       finished = true
-      cleanup().finally(() => reject(error))
+      const poseError = error?.code
+        ? error
+        : createPoseError('pose_frame_extraction_failed', `${label}视频抽帧失败，请重新尝试或更换视频。`, error)
+      logPoseDiagnostics(kind, diagnostics(poseError.code))
+      cleanup().finally(() => reject(poseError))
     }
 
     const failFromVideo = () => {
-      fail(new Error(`${label}视频读取失败，请重新选择视频。`))
+      fail(createPoseError('pose_video_read_failed', `${label}视频读取失败，请重新选择视频。`))
     }
 
     const abort = () => {
@@ -225,7 +282,11 @@ async function extractPoseFrames(video, options = {}) {
 
         if (timestampMs > lastTimestampMs) {
           lastTimestampMs = timestampMs
+          sampledFrames++
           const result = landmarker.detectForVideo(video, timestampMs)
+          if ((result.landmarks || []).some((landmarks) => landmarks?.length >= 33)) {
+            detectedPoseFrames++
+          }
           const tracked = tracker.select(result)
           const frame = tracked.status === 'tracked'
             ? buildPoseFrame(result, mediaTime, tracked.candidateIndex, tracked.trackId)
@@ -236,13 +297,11 @@ async function extractPoseFrames(video, options = {}) {
             frames.push(frame)
             history.push(frame)
             if (canvas) drawPoseFrame(canvas, video, frame, { color })
-            if (frames.length % 30 === 0) {
-              onProgress(`${label}视频已识别 ${frames.length} 帧姿态...`)
-            }
           } else {
             updateTrackingStatus('lost', mediaTime)
             if (canvas) clearPoseCanvas(canvas)
           }
+          reportProgress(mediaTime)
         }
 
         if (video.ended || mediaTime >= (video.duration || mediaTime) - 0.02) {
@@ -265,9 +324,43 @@ async function extractPoseFrames(video, options = {}) {
     signal?.addEventListener('abort', abort, { once: true })
     frameRequestId = video.requestVideoFrameCallback(handleFrame)
     video.play().catch((error) => {
-      fail(new Error(`${label}视频无法自动播放以进行逐帧识别：${error.message}`))
+      fail(createPoseError('pose_frame_extraction_failed', `${label}视频无法启动逐帧读取，请再次点击分析。`, error))
     })
   })
+}
+
+function validatePoseCoverage(diagnostics) {
+  if (diagnostics.sampledFrames === 0) {
+    return { ok: false, code: 'pose_frame_extraction_failed', message: '视频没有成功提取到画面帧，请重新上传或更换视频。' }
+  }
+  if (diagnostics.detectedPoseFrames === 0) {
+    return { ok: false, code: 'pose_not_detected', message: '视频未检测到人体，请确认人物完整入镜且光线清晰。' }
+  }
+
+  const minimumFrames = Math.min(
+    MIN_VALID_POSE_FRAMES,
+    Math.max(3, Math.ceil(diagnostics.sampledFrames * MIN_VALID_POSE_RATIO)),
+  )
+  if (diagnostics.validPoseFrames < minimumFrames || diagnostics.validPoseRatio < MIN_VALID_POSE_RATIO) {
+    return {
+      ok: false,
+      code: 'pose_insufficient_frames',
+      message: `视频已检测到人体，但遮挡或跟踪丢失较多（${diagnostics.validPoseFrames}/${diagnostics.sampledFrames} 帧有效），请框选人物或换一段人物更完整的视频。`,
+    }
+  }
+  return { ok: true }
+}
+
+function createPoseError(code, message, cause = null) {
+  const error = new Error(message, cause ? { cause } : undefined)
+  error.code = code
+  return error
+}
+
+function logPoseDiagnostics(kind, diagnostics) {
+  const method = diagnostics.failureStage ? 'warn' : 'info'
+  const stage = diagnostics.failureStage || 'complete'
+  console[method](`[DanceMirror pose] role=${kind} sampled=${diagnostics.sampledFrames} detected=${diagnostics.detectedPoseFrames} valid=${diagnostics.validPoseFrames} ratio=${diagnostics.validPoseRatio} stage=${stage}`)
 }
 
 function throwIfAborted(signal) {
@@ -453,4 +546,6 @@ export {
   findNearestPoseFrame,
   ensureVideoReady,
   seekVideo,
+  validatePoseCoverage,
+  createPoseError,
 }

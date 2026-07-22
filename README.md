@@ -58,7 +58,9 @@ DEEPSEEK_API_KEY=...
 - FFmpeg 转为 H.264 + AAC、最高 1080p/30fps；
 - 老师音轨强校验，用户无音轨时支持手动校准；
 - 双侧人物手动框选、连续跟踪与丢失区间保护；
-- Web Audio 对齐、公共时间轴、MediaPipe Pose、DTW 差异分析；
+- Web Audio 对齐、公共时间轴、真实 MediaPipe Pose、DTW 差异分析；
+- 双视频独立姿态 Canvas，显示关键点、骨架以及手腕和脚踝连续轨迹；
+- 使用唯一 `stepId` 记录模型、双视频推理、差异和报告阶段，失败时明确标记未执行步骤；
 - 1–3 个非评分式问题、时间轴节点和 Report v1 运行时校验；
 - DeepSeek v4 Flash/Pro 和规则报告降级；
 - 匿名 session token、取消、stale、替换和“删除本次数据”；
@@ -102,6 +104,7 @@ tests/                             contract、unit、integration 测试
 ## 当前限制
 
 - 自动多人代表帧候选尚未完成，当前支持自动主目标与双侧手动框选。
+- Pose Landmarker 每帧最多返回 4 个候选；密集多人场景没有完整 ReID，仍需手动框选并允许短暂跟踪丢失。
 - 首版音轨和姿态分析在浏览器执行，低端手机性能需要 3–5 组真实视频压测。
 - 当前开发机没有 Docker；容器配置尚需在具备 Docker 的机器完成运行验收。
 - 2026-07-21 已完成首次 ECS 部署；正式域名、HTTPS 与 OSS 迁移仍待完成。

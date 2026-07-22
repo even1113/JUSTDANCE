@@ -9,6 +9,10 @@ let visionFilesetPromise = null
 function getVisionFileset() {
   if (!visionFilesetPromise) {
     visionFilesetPromise = FilesetResolver.forVisionTasks(VISION_WASM_BASE)
+      .catch((error) => {
+        visionFilesetPromise = null
+        throw error
+      })
   }
 
   return visionFilesetPromise

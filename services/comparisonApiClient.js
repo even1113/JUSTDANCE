@@ -276,11 +276,23 @@ function contentTypeFromName(name) {
 
 function wait(duration, signal) {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, duration)
-    signal?.addEventListener('abort', () => {
+    const cleanup = () => signal?.removeEventListener('abort', abort)
+    const finish = () => {
+      cleanup()
+      resolve()
+    }
+    const abort = () => {
       clearTimeout(timer)
+      cleanup()
       reject(createAbortError())
-    }, { once: true })
+    }
+    const timer = setTimeout(finish, duration)
+
+    if (signal?.aborted) {
+      abort()
+      return
+    }
+    signal?.addEventListener('abort', abort, { once: true })
   })
 }
 
@@ -298,4 +310,5 @@ export {
   TERMINAL_ANALYSIS_STATES,
   createComparisonApiClient,
   uploadWithProgress,
+  wait,
 }

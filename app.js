@@ -10,7 +10,14 @@ import {
   validateVideoFile,
 } from './services/appState.js'
 import { createComparisonApiClient } from './services/comparisonApiClient.js'
-import { runPoseComparison } from './services/poseExtractor.js'
+import { createPosePlaybackRenderer, runPoseComparison } from './services/poseExtractor.js'
+import {
+  completeAnalysisTrace,
+  createAnalysisTrace,
+  failAnalysisTrace,
+  traceStatusLabel,
+  upsertAnalysisTrace,
+} from './services/analysisTrace.js'
 import { buildStructuredAnalysisForModel } from './services/feedbackGenerator.js'
 import { assertValidStructuredAnalysis } from './services/structuredAnalysisSchema.js'
 import { renderCandidateCard, renderIssueCard } from './components/uiComponents.js'
@@ -65,6 +72,7 @@ let activeCropRole = null
 let cropDraft = { ...DEFAULT_CROP_RECT }
 let cropPointerId = null
 let cropStartPoint = null
+let posePlaybackDisposers = []
 
 const elements = {
   stageViews: [...document.querySelectorAll('[data-stage]')],
@@ -104,6 +112,8 @@ const elements = {
   comparisonWorkspace: document.querySelector('#comparisonWorkspace'),
   teacherCompareVideo: document.querySelector('#teacherCompareVideo'),
   userCompareVideo: document.querySelector('#userCompareVideo'),
+  teacherPoseCanvas: document.querySelector('#teacherPoseCanvas'),
+  userPoseCanvas: document.querySelector('#userPoseCanvas'),
   workspaceAlignmentBadge: document.querySelector('#workspaceAlignmentBadge'),
   sharedProgress: document.querySelector('#sharedProgress'),
   timelineOverlay: document.querySelector('#timelineOverlay'),
@@ -197,6 +207,7 @@ function setStage(stage, { focus = true } = {}) {
     renderWorkspace()
   } else {
     elements.comparisonWorkspace.classList.add('hidden')
+    disposePosePlaybackRenderers()
     stopPlayback()
   }
 
@@ -827,6 +838,34 @@ function renderWorkspace() {
   }
   renderTimeline()
   updateCommonTime(state.commonTime, { skipIssueRender: true })
+  window.requestAnimationFrame(setupPosePlaybackRenderers)
+}
+
+function setupPosePlaybackRenderers() {
+  disposePosePlaybackRenderers()
+  const teacherFrames = state.poseFrames?.teacher
+  const userFrames = state.poseFrames?.user
+  if (!teacherFrames?.length || !userFrames?.length) return
+
+  posePlaybackDisposers = [
+    createPosePlaybackRenderer(
+      elements.teacherCompareVideo,
+      elements.teacherPoseCanvas,
+      teacherFrames,
+      { color: '#b7f34a' },
+    ),
+    createPosePlaybackRenderer(
+      elements.userCompareVideo,
+      elements.userPoseCanvas,
+      userFrames,
+      { color: '#ff5a7a' },
+    ),
+  ]
+}
+
+function disposePosePlaybackRenderers() {
+  posePlaybackDisposers.forEach((dispose) => dispose())
+  posePlaybackDisposers = []
 }
 
 function renderWorkspaceSubjectLock(role) {
@@ -921,9 +960,14 @@ async function startAnalysis(options = {}) {
   }
   const isRetry = options?.isRetry === true
   abortActiveTask()
+  disposePosePlaybackRenderers()
   nextTaskVersion(state)
   state.analysisSteps = { active: null, completed: [], steps: ANALYSIS_STEPS }
-  state.analysisTrace = createInitialAnalysisTrace(isRetry)
+  state.analysisTrace = createAnalysisTrace({
+    alignmentMethod: state.alignment?.method,
+    isRetry,
+  })
+  state.poseFrames = null
   state.errorContext = null
   renderAnalysisTrace()
   renderStepper(elements.analysisStepper, state.analysisSteps)
@@ -943,6 +987,8 @@ async function startAnalysis(options = {}) {
       message: '分析已完成，正在保留本次处理记录并准备复盘。',
       status: 'complete',
     })
+    state.analysisTrace = completeAnalysisTrace(state.analysisTrace)
+    renderAnalysisTrace()
     state.activeMismatchIndex = 0
     state.commonTime = state.report.mismatches[0]?.startTime || 0
     await holdAnalysisResult(ANALYSIS_COMPLETE_HOLD_MS, activeController.signal)
@@ -961,12 +1007,11 @@ async function startAnalysis(options = {}) {
       steps: ANALYSIS_STEPS,
     }
     renderStepper(elements.analysisStepper, state.analysisSteps)
-    appendAnalysisTrace({
-      key: 'error',
-      label: '分析失败',
-      message: state.error,
-      status: 'error',
-    })
+    state.analysisTrace = failAnalysisTrace(
+      state.analysisTrace,
+      analysisFailureTraceStep(error),
+      state.error,
+    )
     renderAnalysisTrace()
     elements.blockingErrorMessage.textContent = state.error
     setStage('blocking-error')
@@ -981,8 +1026,6 @@ async function runAnalysis(signal) {
   const poseAnalysis = await runPoseComparison({
     teacherVideo: elements.teacherCompareVideo,
     userVideo: elements.userCompareVideo,
-    teacherCanvas: null,
-    userCanvas: null,
     cropInfo: analysisCropFor('user'),
     subjectSelections: {
       teacher: analysisCropFor('teacher'),
@@ -990,10 +1033,21 @@ async function runAnalysis(signal) {
     },
     audioAlignment: state.alignment,
     signal,
+    onPoseFramesReady({ teacherFrames, userFrames }) {
+      state.poseFrames = {
+        teacher: teacherFrames,
+        user: userFrames,
+      }
+    },
     onProgress(update) {
       const message = typeof update === 'string' ? update : update.message
       const progress = mapPoseAnalysisProgress(update)
-      renderAnalysisProgress(progress, { message, metrics: update })
+      renderAnalysisProgress(progress, {
+        message,
+        metrics: update,
+        status: update?.status,
+        traceStepId: update?.stepId,
+      })
     },
   })
   state.poseAnalysis = poseAnalysis
@@ -1015,7 +1069,8 @@ async function runAnalysis(signal) {
       state.analysisTaskId = analysis.id
     },
     onStatus(analysis) {
-      renderAnalysisProgress(mapApiAnalysisProgress(analysis))
+      const traceUpdate = mapApiTraceUpdate(analysis)
+      renderAnalysisProgress(mapApiAnalysisProgress(analysis), traceUpdate)
       elements.analysisFallback.classList.toggle('hidden', analysis.status !== 'fallback')
     },
   })
@@ -1023,7 +1078,7 @@ async function runAnalysis(signal) {
 
 function analysisCropFor(role) {
   const selection = state.subjectSelections[role]
-  return selection?.mode === 'manual' ? getNormalizedSubjectRect(selection) : null
+  return selection?.mode === 'manual' ? selection.rect : null
 }
 
 function renderAnalysisProgress(progress, options = {}) {
@@ -1033,17 +1088,22 @@ function renderAnalysisProgress(progress, options = {}) {
   const message = options.message || activeStep?.detail || '结构化分析已完成，正在整理复盘报告。'
   elements.analysisLiveMessage.textContent = message
   renderAnalysisMetrics(options.metrics)
-  appendAnalysisTrace({
-    key: progress.active || 'complete',
-    label: activeStep?.label || '分析完成',
-    message,
-    status: options.status || (progress.active ? 'active' : 'complete'),
-  })
+  if (options.traceStepId) {
+    state.analysisTrace = upsertAnalysisTrace(state.analysisTrace, {
+      stepId: options.traceStepId,
+      message,
+      status: options.status || (progress.active ? 'active' : 'complete'),
+    })
+  }
   renderAnalysisTrace()
 }
 
 function renderAnalysisMetrics(metrics) {
-  const hasMetrics = metrics && typeof metrics === 'object' && metrics.kind
+  const hasMetrics = metrics
+    && typeof metrics === 'object'
+    && metrics.stage === 'pose'
+    && metrics.kind
+    && Number.isFinite(Number(metrics.sampledFrames))
   elements.analysisRealProgress.classList.toggle('hidden', !hasMetrics)
   elements.analysisFrameStats.classList.toggle('hidden', !hasMetrics)
   if (!hasMetrics) return
@@ -1060,54 +1120,23 @@ function renderAnalysisMetrics(metrics) {
 function renderAnalysisTrace() {
   const trace = state.analysisTrace.length
     ? state.analysisTrace
-    : [{ key: 'pending', label: '准备任务', message: '正在准备分析任务…', status: 'pending' }]
-  const html = trace
-    .map((item) => `<p class="trace-${escapeHtml(item.status || 'complete')}"><strong>${escapeHtml(item.label)}</strong>${escapeHtml(item.message)}</p>`)
-    .join('')
+    : [{ stepId: 'pending', label: '准备任务', message: '正在准备分析任务…', status: 'pending' }]
+  const html = `<ol class="analysis-trace-list">${trace
+    .map((item) => {
+      const status = item.status || 'pending'
+      return `<li class="analysis-trace-item trace-${escapeHtml(status)}" data-trace-step-id="${escapeHtml(item.stepId)}"><span class="trace-status-dot" aria-hidden="true"></span><div class="trace-copy"><div class="trace-heading"><strong>${escapeHtml(item.label)}</strong><span class="trace-state">${escapeHtml(traceStatusLabel(status))}</span></div><p>${escapeHtml(item.message)}</p></div></li>`
+    })
+    .join('')}</ol>`
   elements.analysisTraceContent.innerHTML = html
   elements.analysisErrorTraceContent.innerHTML = html
   elements.analysisErrorTrace.classList.toggle('hidden', state.errorContext !== 'analysis')
 }
 
-function appendAnalysisTrace(entry) {
-  const lastTrace = state.analysisTrace.at(-1)
-  if (lastTrace?.key === entry.key) {
-    Object.assign(lastTrace, entry)
-    return
-  }
-  if (lastTrace?.status === 'active') lastTrace.status = 'complete'
-  state.analysisTrace.push(entry)
-}
-
-function createInitialAnalysisTrace(isRetry) {
-  const usedManualAlignment = state.alignment?.method === 'manual'
-  const trace = [
-    {
-      key: 'preprocess',
-      label: '视频预处理',
-      message: '两段视频已通过服务端校验并完成统一格式处理。',
-      status: 'complete',
-    },
-    {
-      key: 'alignment',
-      label: '音频同步',
-      message: usedManualAlignment ? '已使用手动动作起点完成校准。' : '已确定两段视频的共同动作区间。',
-      status: 'complete',
-    },
-  ]
-  if (isRetry) {
-    trace.push({
-      key: 'retry',
-      label: '重新尝试',
-      message: '已重新提交分析，继续使用本次已确认的视频和校准结果。',
-      status: 'complete',
-    })
-  }
-  return trace
-}
-
 function mapPoseAnalysisProgress(update) {
   const message = typeof update === 'string' ? update : update?.message
+  if (update?.stage === 'model') {
+    return { active: 'keyframes', completed: [], steps: ANALYSIS_STEPS }
+  }
   if (update?.stage === 'difference') {
     return { active: 'difference', completed: ['keyframes', 'pose'], steps: ANALYSIS_STEPS }
   }
@@ -1128,6 +1157,14 @@ function analysisFailureStep(error) {
   return state.analysisSteps.active || 'difference'
 }
 
+function analysisFailureTraceStep(error) {
+  const code = String(error?.code || '')
+  if (code === 'pose_model_load_failed') return 'model'
+  if (code.startsWith('pose_')) return error?.role === 'teacher' ? 'pose-teacher' : 'pose-user'
+  if (state.analysisSteps.active === 'coach') return 'coach'
+  return 'difference'
+}
+
 function mapApiAnalysisProgress(analysis) {
   const completed = ['keyframes', 'pose']
   let active = 'difference'
@@ -1143,6 +1180,30 @@ function mapApiAnalysisProgress(analysis) {
   }
 
   return { active, completed, steps: ANALYSIS_STEPS }
+}
+
+function mapApiTraceUpdate(analysis) {
+  if (analysis.status === 'success' || analysis.status === 'fallback') {
+    return {
+      traceStepId: 'coach',
+      status: 'complete',
+      message: analysis.status === 'fallback'
+        ? '模型服务不可用，已根据真实结构化差异生成可执行的本地兜底复盘。'
+        : '已根据真实结构化动作差异生成复盘建议。',
+    }
+  }
+  if (analysis.stage === 'model_summarizing') {
+    return {
+      traceStepId: 'coach',
+      status: 'active',
+      message: '正在根据结构化动作差异生成复盘建议。',
+    }
+  }
+  return {
+    traceStepId: 'difference',
+    status: 'complete',
+    message: '结构化动作差异已经提交，等待复盘生成。',
+  }
 }
 
 function renderReport() {
@@ -1293,6 +1354,7 @@ function showToast(message, type = 'success') {
 
 function clearResults(options = {}) {
   stopPlayback()
+  disposePosePlaybackRenderers()
   if (!options.preserveSession) {
     state.sessionId = null
     state.sessionToken = null
@@ -1305,6 +1367,7 @@ function clearResults(options = {}) {
   state.manualAnchors = { teacher: null, user: null }
   state.report = null
   state.poseAnalysis = null
+  state.poseFrames = null
   state.analysisTrace = []
   state.errorContext = null
   state.activeMismatchIndex = -1
@@ -1337,6 +1400,7 @@ function abortActiveTask() {
   if (taskId && sessionToken) {
     comparisonApi.cancelAnalysis(taskId, sessionToken).catch(() => {})
   }
+  disposePosePlaybackRenderers()
   stopPlayback()
 }
 

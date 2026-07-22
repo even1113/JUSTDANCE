@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'vitest'
-import { createComparisonApiClient } from '../../services/comparisonApiClient.js'
+import { createComparisonApiClient, wait } from '../../services/comparisonApiClient.js'
 import { createStructuredAnalysisFixture } from '../fixtures/structured-analysis.js'
 import { seedReadyVideos, startTestServer } from '../helpers/test-server.js'
 
@@ -10,6 +10,14 @@ afterEach(async () => {
 })
 
 describe('comparison API client', () => {
+  test('removes a polling abort listener after a normal wait completes', async () => {
+    const signal = createTrackedSignal()
+
+    await wait(1, signal)
+
+    expect(signal.listenerCount()).toBe(0)
+  })
+
   test('creates a session, polls analysis, and validates the report', async () => {
     const testServer = await startTestServer()
     const { origin, runtime } = testServer
@@ -61,6 +69,22 @@ describe('comparison API client', () => {
     expect(cancelled.status).toBe('cancelled')
   })
 })
+
+function createTrackedSignal() {
+  const listeners = new Set()
+  return {
+    aborted: false,
+    addEventListener(_type, listener) {
+      listeners.add(listener)
+    },
+    removeEventListener(_type, listener) {
+      listeners.delete(listener)
+    },
+    listenerCount() {
+      return listeners.size
+    },
+  }
+}
 
 function createSlowModelClient() {
   return {

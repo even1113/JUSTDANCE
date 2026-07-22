@@ -21,6 +21,7 @@ function createInitialAppState() {
     sessionToken: null,
     analysisTaskId: null,
     poseAnalysis: null,
+    poseFrames: null,
     taskVersion: 0,
     videos: { teacher: null, user: null },
     processingSteps: [],

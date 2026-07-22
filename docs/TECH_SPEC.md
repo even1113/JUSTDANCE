@@ -1,8 +1,9 @@
-<!-- version: v0.6 | updated: 2026-07-18 -->
+<!-- version: v0.7 | updated: 2026-07-22 -->
 # DanceMirror Tech Spec
 
 ## Changelog
 
+- v0.7 (2026-07-22)：补齐 MediaPipe 分阶段诊断、唯一分析步骤、双 Canvas 姿态骨架与手脚轨迹播放
 - v0.6 (2026-07-18)：落地真实 API/Worker、PostgreSQL、Redis、OSS、本地磁盘、FFmpeg、DeepSeek v4 与 24 小时清理架构
 - v0.5 (2026-07-17)：Demo 引入显式页面状态机与受控后端目标架构
 - v0.4 (2026-07-17)：分段音频映射、公共播放轴、多人主体锁定与丢失保护
@@ -89,11 +90,13 @@ Redis / BullMQ ── Worker
 2. MediaPipe Pose Landmarker 从项目本地资源加载，不依赖运行时 CDN。
 3. 浏览器逐帧采样整段视频，分别记录采样帧、模型检出帧和 tracker 有效帧；有效帧至少 8 帧且占采样帧 20%，允许短暂遮挡但不接受极低覆盖率。
 4. 双侧 tracker 锁定同一目标；不可信时记录 tracking gap，不静默换人。
-5. 姿态阶段使用稳定错误码区分 `pose_video_read_failed`、`pose_frame_extraction_failed`、`pose_model_load_failed`、`pose_not_detected` 和 `pose_insufficient_frames`，日志只记录角色、帧数、有效率和失败阶段。
-6. 对比播放默认开启老师音轨并静音用户音轨；用户可主动切换音频焦点，但同一时间只保留一个可听音轨。
-7. H5 输出无评分的 `structuredAnalysis`，服务端再次运行时校验。
-8. Worker 先生成确定性的规则报告，再调用 DeepSeek 改写教练文案。
-9. Flash 失败后尝试 Pro；全部失败或输出无效时返回规则报告，任务状态为 `fallback`。
+5. 姿态阶段使用稳定错误码区分 `pose_video_read_failed`、`pose_frame_extraction_failed`、`pose_model_load_failed`、`pose_inference_failed`、`pose_not_detected` 和 `pose_insufficient_frames`，日志只记录角色、视频尺寸、时长、帧数、有效率和失败阶段。
+6. 分析过程使用固定唯一 `stepId`；高频推理进度和服务端轮询只更新原步骤，任务成功、失败、取消或离开页面时清理监听和绘制循环。
+7. 老师和用户各自使用独立 Canvas，根据视频 `object-fit: contain` 的内容区域换算坐标，并使用真实连续帧绘制关键点、骨架、手腕和脚踝轨迹。
+8. 对比播放默认开启老师音轨并静音用户音轨；用户可主动切换音频焦点，但同一时间只保留一个可听音轨。
+9. H5 输出无评分的 `structuredAnalysis`，服务端再次运行时校验。
+10. Worker 先生成确定性的规则报告，再调用 DeepSeek 改写教练文案。
+11. Flash 失败后尝试 Pro；全部失败或输出无效时返回规则报告，任务状态为 `fallback`。
 10. 模型只能改变文案，不得改变问题数量、时间区间、严重度和证据。
 
 ## 5. API
@@ -194,6 +197,7 @@ docker compose --env-file .env \
 ## 11. 已知边界
 
 - 自动多人代表帧候选尚未完成，当前提供自动主目标与双侧手动框选。
+- Pose Landmarker 配置为每帧最多 4 人，返回多个人体检测但不提供跨帧 ReID；密集多人场景仍依赖手动框选、姿态签名和短暂丢失恢复。
 - 姿态识别和音轨对齐仍在浏览器执行，低端手机的耗时和内存需真实压测。
 - 当前开发机没有 Docker，容器文件只能做静态验证，需在具备 Docker 的机器完成运行验收。
-- 尚未购买 ECS、域名、OSS 等资源，因此没有线上地址或 OSS/RDS/Redis 实测结果。
+- 已有 ECS 公网环境；正式域名、HTTPS、OSS/RDS/Redis 的完整生产验收仍待完成。

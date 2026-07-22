@@ -199,7 +199,7 @@
           <div id="reportWorkspaceMount"></div>
           <details class="analysis-trace" id="analysisTrace">
             <summary>查看本次分析过程</summary>
-            <blockquote id="analysisTraceContent"></blockquote>
+            <div class="analysis-trace-content" id="analysisTraceContent"></div>
           </details>
           <div class="tracking-gap hidden" id="trackingGapMessage"></div>
           <section class="coach-summary" aria-labelledby="coachSummaryTitle">
@@ -215,7 +215,7 @@
         </section>
 
         <section class="page-view" data-stage="blocking-error" aria-labelledby="errorTitle">
-          <div class="blocking-state"><div class="error-symbol">!</div><span class="eyebrow coral">NEEDS ATTENTION</span><h1 id="errorTitle">这次没有处理成功</h1><p id="blockingErrorMessage">视频处理服务暂时不可用，请稍后重试。</p><details class="analysis-trace hidden" id="analysisErrorTrace"><summary>查看失败前的处理过程</summary><blockquote id="analysisErrorTraceContent"></blockquote></details><div class="page-actions stacked-actions"><button class="button primary" id="retryFromError" type="button">重新尝试</button><button class="button secondary" type="button" data-return-upload>返回更换视频</button></div><small>如果连续失败，请确认浏览器和网络正常，或换一段更短的视频。</small></div>
+          <div class="blocking-state"><div class="error-symbol">!</div><span class="eyebrow coral">NEEDS ATTENTION</span><h1 id="errorTitle">这次没有处理成功</h1><p id="blockingErrorMessage">视频处理服务暂时不可用，请稍后重试。</p><details class="analysis-trace hidden" id="analysisErrorTrace"><summary>查看失败前的处理过程</summary><div class="analysis-trace-content" id="analysisErrorTraceContent"></div></details><div class="page-actions stacked-actions"><button class="button primary" id="retryFromError" type="button">重新尝试</button><button class="button secondary" type="button" data-return-upload>返回更换视频</button></div><small>如果连续失败，请确认浏览器和网络正常，或换一段更短的视频。</small></div>
         </section>
       </main>
 
@@ -225,8 +225,8 @@
     <section class="comparison-workspace hidden" id="comparisonWorkspace" aria-label="双视频同步比对工作台">
       <div class="workspace-head"><div><span class="eyebrow">FRAME COMPARE</span><h2>老师和我的动作</h2></div><span class="status-badge success" id="workspaceAlignmentBadge">同步完成</span></div>
       <div class="dual-video-stage">
-        <article class="video-viewport teacher"><div class="viewport-label"><span class="role-label teacher">老师</span><span>目标人物已锁定</span></div><div class="viewport-media"><video id="teacherCompareVideo" playsinline preload="metadata"></video><div class="subject-lock-box" aria-hidden="true"></div></div></article>
-        <article class="video-viewport user"><div class="viewport-label"><span class="role-label user">我的练习</span><span>目标人物已锁定</span></div><div class="viewport-media"><video id="userCompareVideo" muted playsinline preload="metadata"></video><div class="subject-lock-box" aria-hidden="true"></div></div></article>
+        <article class="video-viewport teacher"><div class="viewport-label"><span class="role-label teacher">老师</span><span>目标人物已锁定</span></div><div class="viewport-media"><video id="teacherCompareVideo" playsinline preload="metadata"></video><canvas class="pose-overlay" id="teacherPoseCanvas" aria-hidden="true"></canvas><div class="subject-lock-box" aria-hidden="true"></div></div></article>
+        <article class="video-viewport user"><div class="viewport-label"><span class="role-label user">我的练习</span><span>目标人物已锁定</span></div><div class="viewport-media"><video id="userCompareVideo" muted playsinline preload="metadata"></video><canvas class="pose-overlay" id="userPoseCanvas" aria-hidden="true"></canvas><div class="subject-lock-box" aria-hidden="true"></div></div></article>
       </div>
       <div class="playback-panel">
         <div class="shared-timeline"><input id="sharedProgress" type="range" min="0" max="32" step="0.01" value="0" aria-label="共享视频进度" /><div class="timeline-overlay" id="timelineOverlay"></div></div>

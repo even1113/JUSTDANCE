@@ -226,6 +226,18 @@ function lostResult(trackId, lostFrames, everLocked) {
 
 function normalizeCropRect(cropRect, videoWidth, videoHeight) {
   if (!cropRect) return null
+  const values = [cropRect.x, cropRect.y, cropRect.width, cropRect.height].map(Number)
+  const isAlreadyNormalized = !cropRect.sourceWidth
+    && !cropRect.sourceHeight
+    && values.every((value) => Number.isFinite(value) && value >= 0 && value <= 1)
+  if (isAlreadyNormalized) {
+    return {
+      x: clamp(values[0], 0, 1),
+      y: clamp(values[1], 0, 1),
+      width: clamp(values[2], 0.001, 1),
+      height: clamp(values[3], 0.001, 1),
+    }
+  }
 
   const width = Number(cropRect.sourceWidth) || Number(videoWidth) || 1
   const height = Number(cropRect.sourceHeight) || Number(videoHeight) || 1

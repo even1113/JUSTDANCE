@@ -1,4 +1,9 @@
-import { clearPoseCanvas, drawPoseFrame, getPoseTrailFrames } from '../components/PoseCanvas.js'
+import {
+  clearPoseCanvas,
+  drawPoseFrame,
+  getPoseTrailFrames,
+  syncPoseCanvasSize,
+} from '../components/PoseCanvas.js'
 import { createPoseLandmarker } from '../hooks/usePoseLandmarker.js'
 import { alignPoseFramesToAudio } from './audioAlignment.js'
 import { analyzeMovementMetrics } from './movementMetrics.js'
@@ -8,6 +13,7 @@ const POSE_PLAYBACK_RATE = 1
 const MIN_VALID_POSE_FRAMES = 8
 const MIN_VALID_POSE_RATIO = 0.2
 const PROGRESS_INTERVAL_MS = 250
+const POSE_OVERLAY_INTERVAL_MS = 1000 / 15
 
 async function runPoseComparison({
   teacherVideo,
@@ -466,17 +472,23 @@ function createPosePlaybackRenderer(video, canvas, frames, options = {}) {
   let frameRequestId = null
   let disposed = false
   let lastStatus = null
+  let lastRenderedTimestamp = null
+  let lastRenderAt = -Infinity
   const resizeObserver = typeof ResizeObserver === 'function'
-    ? new ResizeObserver(() => renderCurrentFrame())
+    ? new ResizeObserver(() => {
+      syncPoseCanvasSize(canvas)
+      renderCurrentFrame(true)
+    })
     : null
 
-  const renderCurrentFrame = () => {
+  const renderCurrentFrame = (force = false, mediaTime = video.currentTime || 0) => {
     if (disposed) return
     const isLost = lostIntervals.some((interval) => {
-      return video.currentTime >= interval.startTime && video.currentTime <= interval.endTime
+      return mediaTime >= interval.startTime && mediaTime <= interval.endTime
     })
     if (isLost) {
-      clearPoseCanvas(canvas)
+      if (lastStatus !== 'lost') clearPoseCanvas(canvas)
+      lastRenderedTimestamp = null
       if (lastStatus !== 'lost') {
         lastStatus = 'lost'
         onTrackingStatus('lost')
@@ -484,39 +496,49 @@ function createPosePlaybackRenderer(video, canvas, frames, options = {}) {
       return
     }
 
-    const frame = findNearestPoseFrame(frames, video.currentTime || 0)
-    if (!frame || Math.abs(frame.timestamp - video.currentTime) > 0.28) {
-      clearPoseCanvas(canvas)
+    const frame = findNearestPoseFrame(frames, mediaTime)
+    if (!frame || Math.abs(frame.timestamp - mediaTime) > 0.28) {
+      if (lastStatus !== 'empty') clearPoseCanvas(canvas)
+      lastStatus = 'empty'
+      lastRenderedTimestamp = null
       return
     }
+    if (!force && frame.timestamp === lastRenderedTimestamp) return
     drawPoseFrame(canvas, video, frame, {
       color,
       history: getPoseTrailFrames(frames, frame.timestamp),
+      syncSize: false,
     })
+    lastRenderedTimestamp = frame.timestamp
     if (lastStatus !== 'tracked') {
       lastStatus = 'tracked'
       onTrackingStatus('tracked')
     }
   }
 
-  const handleVideoFrame = () => {
+  const handleVideoFrame = (now, metadata) => {
     if (disposed) return
-    renderCurrentFrame()
+    if (now - lastRenderAt >= POSE_OVERLAY_INTERVAL_MS) {
+      renderCurrentFrame(false, (metadata?.mediaTime ?? video.currentTime) || 0)
+      lastRenderAt = now
+    }
     frameRequestId = video.requestVideoFrameCallback(handleVideoFrame)
   }
 
-  video.addEventListener('seeked', renderCurrentFrame)
-  video.addEventListener('loadeddata', renderCurrentFrame)
-  video.addEventListener('pause', renderCurrentFrame)
+  const renderForcedFrame = () => renderCurrentFrame(true)
+  video.addEventListener('seeked', renderForcedFrame)
+  video.addEventListener('loadeddata', renderForcedFrame)
+  video.addEventListener('pause', renderForcedFrame)
+  syncPoseCanvasSize(canvas)
   resizeObserver?.observe(canvas.parentElement || canvas)
   frameRequestId = video.requestVideoFrameCallback(handleVideoFrame)
-  renderCurrentFrame()
+  renderForcedFrame()
 
   return () => {
     disposed = true
-    video.removeEventListener('seeked', renderCurrentFrame)
-    video.removeEventListener('loadeddata', renderCurrentFrame)
-    video.removeEventListener('pause', renderCurrentFrame)
+    video.removeEventListener('seeked', renderForcedFrame)
+    video.removeEventListener('loadeddata', renderForcedFrame)
+    video.removeEventListener('pause', renderForcedFrame)
     resizeObserver?.disconnect()
     if (frameRequestId !== null && video.cancelVideoFrameCallback) {
       video.cancelVideoFrameCallback(frameRequestId)

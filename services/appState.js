@@ -32,6 +32,7 @@ function createInitialAppState() {
     manualAnchors: { teacher: null, user: null },
     report: null,
     activeMismatchIndex: -1,
+    expandedMismatchIds: [],
     commonTime: 0,
     error: null,
     errorContext: null,
@@ -99,6 +100,14 @@ function getActiveMismatchIndex(mismatches, commonTime) {
   ))
 }
 
+function toggleExpandedMismatchId(expandedIds, mismatchId) {
+  if (!mismatchId) return Array.isArray(expandedIds) ? [...expandedIds] : []
+  const next = new Set(Array.isArray(expandedIds) ? expandedIds : [])
+  if (next.has(mismatchId)) next.delete(mismatchId)
+  else next.add(mismatchId)
+  return [...next]
+}
+
 function nextTaskVersion(state) {
   state.taskVersion += 1
   return state.taskVersion
@@ -114,6 +123,7 @@ export {
   createInitialAppState,
   getActiveMismatchIndex,
   nextTaskVersion,
+  toggleExpandedMismatchId,
   validateVideoDuration,
   validateVideoFile,
 }

@@ -1398,18 +1398,6 @@ button:disabled {
   white-space: nowrap;
 }
 
-.audio-button {
-  min-width: 92px;
-  white-space: nowrap;
-}
-
-.audio-button.active {
-  border-color: var(--cyan);
-  background: var(--cyan-soft);
-  color: #08758d;
-  font-weight: 750;
-}
-
 .analysis-process-panel,
 .analysis-live-output,
 .analysis-trace {
@@ -1792,7 +1780,7 @@ button:disabled {
   border-left-color: var(--severity-low);
 }
 
-.issue-card.active {
+.issue-card.timeline-active {
   border-color: var(--ink);
   border-left-color: var(--severity-high);
   box-shadow: 0 0 0 3px rgb(23 23 25 / 7%), var(--shadow-card);
@@ -1810,6 +1798,14 @@ button:disabled {
   padding: 12px;
   color: inherit;
   text-align: left;
+}
+
+.issue-card-head .icon {
+  transition: transform 160ms ease;
+}
+
+.issue-card.expanded .issue-card-head .icon {
+  transform: rotate(90deg);
 }
 
 .issue-order {
@@ -1848,7 +1844,7 @@ button:disabled {
   padding: 14px;
 }
 
-.issue-card.active .issue-body {
+.issue-card.expanded .issue-body {
   display: block;
 }
 

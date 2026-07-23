@@ -6,6 +6,7 @@ import {
   createInitialAppState,
   getActiveMismatchIndex,
   nextTaskVersion,
+  toggleExpandedMismatchId,
   validateVideoDuration,
   validateVideoFile,
 } from './services/appState.js'
@@ -123,8 +124,6 @@ const elements = {
   stepBack: document.querySelector('#stepBack'),
   stepForward: document.querySelector('#stepForward'),
   playbackRate: document.querySelector('#playbackRate'),
-  teacherAudioToggle: document.querySelector('#teacherAudioToggle'),
-  userAudioToggle: document.querySelector('#userAudioToggle'),
   startAnalysis: document.querySelector('#startAnalysis'),
   reselectSubject: document.querySelector('#reselectSubject'),
   analysisStepper: document.querySelector('#analysisStepper'),
@@ -132,8 +131,6 @@ const elements = {
   analysisLiveMessage: document.querySelector('#analysisLiveMessage'),
   analysisRealProgress: document.querySelector('#analysisRealProgress'),
   analysisFrameStats: document.querySelector('#analysisFrameStats'),
-  analysisTrace: document.querySelector('#analysisTrace'),
-  analysisTraceContent: document.querySelector('#analysisTraceContent'),
   analysisErrorTrace: document.querySelector('#analysisErrorTrace'),
   analysisErrorTraceContent: document.querySelector('#analysisErrorTraceContent'),
   analysisFallback: document.querySelector('#analysisFallback'),
@@ -177,23 +174,7 @@ const videoPlayback = createIndependentVideoPlayback({
     elements.sharedPlay.textContent = isPlaying ? 'Ⅱ' : '▶'
     elements.sharedPlay.setAttribute('aria-label', isPlaying ? '暂停双视频' : '播放双视频')
   },
-  onAudioChange: renderAudioControls,
 })
-
-function renderAudioControls(audioState) {
-  const controls = [
-    { role: 'teacher', button: elements.teacherAudioToggle, muted: audioState.teacherMuted },
-    { role: 'user', button: elements.userAudioToggle, muted: audioState.userMuted },
-  ]
-
-  controls.forEach(({ role, button, muted }) => {
-    const label = role === 'teacher' ? '老师声音' : '我的声音'
-    button.textContent = `${label}：${muted ? '关' : '开'}`
-    button.classList.toggle('active', !muted)
-    button.setAttribute('aria-pressed', String(!muted))
-    button.setAttribute('aria-label', `${muted ? '开启' : '关闭'}${label}`)
-  })
-}
 
 function setStage(stage, { focus = true } = {}) {
   state.stage = stage
@@ -231,7 +212,7 @@ function renderUploadState() {
   elements.startProcessing.disabled = !ready
   const hasBoth = Boolean(state.videos.teacher && state.videos.user)
   elements.startProcessing.textContent = ready
-    ? '自动准备两段视频'
+    ? '立即体验AI分析舞蹈动作'
     : hasBoth ? '视频正在上传和统一格式' : '请先添加两段视频'
 }
 
@@ -828,7 +809,7 @@ function renderWorkspace() {
     video.classList.remove('hidden')
     const playbackUrl = asset.playbackUrl || asset.url
     if (asset.playbackUrl) video.crossOrigin = 'anonymous'
-    if (video.src !== playbackUrl) video.src = playbackUrl
+    setVideoSource(video, playbackUrl)
     renderWorkspaceSubjectLock(role)
   }
 
@@ -839,6 +820,12 @@ function renderWorkspace() {
   renderTimeline()
   updateCommonTime(state.commonTime, { skipIssueRender: true })
   window.requestAnimationFrame(setupPosePlaybackRenderers)
+}
+
+function setVideoSource(video, source) {
+  const normalizedSource = new URL(source, window.location.href).href
+  if (video.currentSrc === normalizedSource || video.src === normalizedSource) return
+  video.src = normalizedSource
 }
 
 function setupPosePlaybackRenderers() {
@@ -973,7 +960,6 @@ async function startAnalysis(options = {}) {
   renderStepper(elements.analysisStepper, state.analysisSteps)
   elements.analysisFallback.classList.add('hidden')
   elements.analysisProcessPanel.open = true
-  elements.analysisTrace.open = false
   setStage('analyzing')
   activeController = new AbortController()
 
@@ -990,6 +976,9 @@ async function startAnalysis(options = {}) {
     state.analysisTrace = completeAnalysisTrace(state.analysisTrace)
     renderAnalysisTrace()
     state.activeMismatchIndex = 0
+    state.expandedMismatchIds = state.report.mismatches[0]?.id
+      ? [state.report.mismatches[0].id]
+      : []
     state.commonTime = state.report.mismatches[0]?.startTime || 0
     await holdAnalysisResult(ANALYSIS_COMPLETE_HOLD_MS, activeController.signal)
     elements.analysisProcessPanel.open = false
@@ -1127,7 +1116,6 @@ function renderAnalysisTrace() {
       return `<li class="analysis-trace-item trace-${escapeHtml(status)}" data-trace-step-id="${escapeHtml(item.stepId)}"><span class="trace-status-dot" aria-hidden="true"></span><div class="trace-copy"><div class="trace-heading"><strong>${escapeHtml(item.label)}</strong><span class="trace-state">${escapeHtml(traceStatusLabel(status))}</span></div><p>${escapeHtml(item.message)}</p></div></li>`
     })
     .join('')}</ol>`
-  elements.analysisTraceContent.innerHTML = html
   elements.analysisErrorTraceContent.innerHTML = html
   elements.analysisErrorTrace.classList.toggle('hidden', state.errorContext !== 'analysis')
 }
@@ -1223,7 +1211,10 @@ function renderReport() {
 
 function renderIssueList() {
   elements.reportIssueList.innerHTML = state.report.mismatches
-    .map((issue, index) => renderIssueCard(issue, index, index === state.activeMismatchIndex))
+    .map((issue, index) => renderIssueCard(issue, index, {
+      active: index === state.activeMismatchIndex,
+      expanded: state.expandedMismatchIds.includes(issue.id),
+    }))
     .join('')
 }
 
@@ -1243,6 +1234,13 @@ function jumpToIssue(index) {
   renderIssueList()
   renderTimeline()
   document.querySelector(`[data-issue-index="${index}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
+
+function toggleIssue(index) {
+  const issue = state.report?.mismatches?.[index]
+  if (!issue) return
+  state.expandedMismatchIds = toggleExpandedMismatchId(state.expandedMismatchIds, issue.id)
+  jumpToIssue(index)
 }
 
 function requestReplaceVideo(role) {
@@ -1371,6 +1369,7 @@ function clearResults(options = {}) {
   state.analysisTrace = []
   state.errorContext = null
   state.activeMismatchIndex = -1
+  state.expandedMismatchIds = []
   state.commonTime = 0
   state.error = null
 }
@@ -1611,8 +1610,6 @@ function bindEvents() {
   elements.stepBack.addEventListener('click', () => seekCommonTime(state.commonTime - PLAYBACK_STEP_SEC))
   elements.stepForward.addEventListener('click', () => seekCommonTime(state.commonTime + PLAYBACK_STEP_SEC))
   elements.playbackRate.addEventListener('click', cyclePlaybackRate)
-  elements.teacherAudioToggle.addEventListener('click', () => videoPlayback.toggleMuted('teacher'))
-  elements.userAudioToggle.addEventListener('click', () => videoPlayback.toggleMuted('user'))
   elements.timelineOverlay.addEventListener('click', (event) => {
     const marker = event.target.closest('[data-marker-index]')
     if (marker) jumpToIssue(Number(marker.dataset.markerIndex))
@@ -1629,8 +1626,8 @@ function bindEvents() {
     setStage('subject-selection')
   })
   elements.reportIssueList.addEventListener('click', (event) => {
-    const trigger = event.target.closest('[data-jump-issue]')
-    if (trigger) jumpToIssue(Number(trigger.dataset.jumpIssue))
+    const trigger = event.target.closest('[data-toggle-issue]')
+    if (trigger) toggleIssue(Number(trigger.dataset.toggleIssue))
   })
   elements.deleteFromReport.addEventListener('click', requestDeleteData)
   elements.retryFromError.addEventListener('click', retryCurrentTask)

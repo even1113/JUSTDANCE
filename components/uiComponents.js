@@ -51,13 +51,16 @@ function renderCandidateCard({ id, role, index, selected, label }) {
     </button>`
 }
 
-function renderIssueCard(issue, index, active = false) {
+function renderIssueCard(issue, index, options = {}) {
+  const active = options.active === true
+  const expanded = options.expanded === true
   const quality = issue.quality === 'reference-only' ? '<span class="status-badge reference">仅供参考</span>' : ''
   const severityText = { high: '最优先', medium: '其次', low: '可以稍后修' }[issue.severity] || '建议关注'
+  const bodyId = `issue-body-${index}`
 
   return `
-    <article class="issue-card severity-${escapeHtml(issue.severity)}${active ? ' active' : ''}" data-issue-index="${index}" tabindex="0">
-      <button class="issue-card-head" type="button" data-jump-issue="${index}">
+    <article class="issue-card severity-${escapeHtml(issue.severity)}${active ? ' timeline-active' : ''}${expanded ? ' expanded' : ''}" data-issue-index="${index}">
+      <button class="issue-card-head" type="button" data-toggle-issue="${index}" aria-expanded="${expanded}" aria-controls="${bodyId}">
         <span class="issue-order">${String(index + 1).padStart(2, '0')}</span>
         <span class="issue-title-wrap">
           <span class="issue-meta"><span>${escapeHtml(issue.timestamp)} · ${severityText}</span>${quality}</span>
@@ -65,7 +68,7 @@ function renderIssueCard(issue, index, active = false) {
         </span>
         ${icon('chevron', 18)}
       </button>
-      <div class="issue-body">
+      <div class="issue-body" id="${bodyId}">
         <p class="positive-copy">${escapeHtml(issue.positive)}</p>
         <dl class="coach-details">
           <div><dt>你这一遍</dt><dd>${escapeHtml(issue.performance)}</dd></div>

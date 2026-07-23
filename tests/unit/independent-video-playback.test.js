@@ -19,14 +19,12 @@ function createVideo() {
 }
 
 describe('independent video playback audio focus', () => {
-  test('defaults to teacher audio and keeps only one audible track', () => {
+  test('always keeps teacher audio enabled and user audio muted', () => {
     const teacher = createVideo()
     const user = createVideo()
-    const onAudioChange = vi.fn()
     const playback = createIndependentVideoPlayback({
       teacherVideoRef: { current: teacher },
       userVideoRef: { current: user },
-      onAudioChange,
     })
 
     playback.refresh()
@@ -35,17 +33,14 @@ describe('independent video playback audio focus', () => {
     expect(teacher.volume).toBe(1)
     expect(user.volume).toBe(1)
 
-    playback.toggleMuted('user')
-    expect(teacher.muted).toBe(true)
-    expect(user.muted).toBe(false)
-
     playback.setAlignment({ timeline: { duration: 10, teacherStart: 0 } })
+    teacher.muted = true
+    user.muted = false
     playback.seekCommon(4)
     playback.setPlaybackRate(1.25)
-    expect(teacher.muted).toBe(true)
-    expect(user.muted).toBe(false)
+    expect(teacher.muted).toBe(false)
+    expect(user.muted).toBe(true)
     expect(teacher.playbackRate).toBe(1.25)
     expect(user.playbackRate).toBe(1.25)
-    expect(onAudioChange).toHaveBeenCalled()
   })
 })

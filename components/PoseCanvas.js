@@ -42,11 +42,12 @@ const DEFAULT_COLOR = '#b7f34a'
 const TRAIL_LANDMARKS = [15, 16, 27, 28]
 const DEFAULT_TRAIL_WINDOW_SEC = 0.85
 const MAX_TRAIL_FRAMES = 30
+const MAX_CANVAS_DPR = 2
 
 function drawPoseFrame(canvas, video, frame, options = {}) {
   if (!canvas || !video || !frame?.landmarks) return
 
-  syncPoseCanvasSize(canvas)
+  if (options.syncSize !== false) syncPoseCanvasSize(canvas)
 
   const ctx = canvas.getContext('2d')
   const color = options.color || DEFAULT_COLOR
@@ -66,7 +67,7 @@ function clearPoseCanvas(canvas) {
 
 function syncPoseCanvasSize(canvas) {
   const rect = canvas.getBoundingClientRect()
-  const scale = window.devicePixelRatio || 1
+  const scale = Math.min(MAX_CANVAS_DPR, window.devicePixelRatio || 1)
   const width = Math.max(1, Math.round(rect.width * scale))
   const height = Math.max(1, Math.round(rect.height * scale))
 
@@ -199,10 +200,23 @@ function getPoseTrailFrames(frames, timestamp, options = {}) {
   const windowSec = Math.max(0.1, Number(options.windowSec) || DEFAULT_TRAIL_WINDOW_SEC)
   const maxFrames = Math.max(2, Number(options.maxFrames) || MAX_TRAIL_FRAMES)
   const startTime = Number(timestamp) - windowSec
-  const trail = frames.filter((frame) => {
-    return Number(frame.timestamp) >= startTime && Number(frame.timestamp) <= Number(timestamp) + 0.01
-  })
-  return trail.slice(-maxFrames)
+  const endTime = Number(timestamp) + 0.01
+  const startIndex = findFrameIndex(frames, startTime, false)
+  const endIndex = findFrameIndex(frames, endTime, true)
+  return frames.slice(Math.max(startIndex, endIndex - maxFrames), endIndex)
+}
+
+function findFrameIndex(frames, timestamp, afterEqual) {
+  let low = 0
+  let high = frames.length
+
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2)
+    const frameTime = Number(frames[middle]?.timestamp)
+    if (frameTime < timestamp || (afterEqual && frameTime <= timestamp)) low = middle + 1
+    else high = middle
+  }
+  return low
 }
 
 function withAlpha(color, alpha) {
@@ -226,6 +240,7 @@ function hexToRgb(hex) {
 export {
   POSE_CONNECTIONS,
   TRAIL_LANDMARKS,
+  MAX_CANVAS_DPR,
   drawPoseFrame,
   clearPoseCanvas,
   getContainedContentRect,

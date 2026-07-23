@@ -197,10 +197,6 @@
             <p>拖动时间轴或点击差异节点，视频和下面的建议会一起切换。</p>
           </div>
           <div id="reportWorkspaceMount"></div>
-          <details class="analysis-trace" id="analysisTrace">
-            <summary>查看本次分析过程</summary>
-            <div class="analysis-trace-content" id="analysisTraceContent"></div>
-          </details>
           <div class="tracking-gap hidden" id="trackingGapMessage"></div>
           <section class="coach-summary" aria-labelledby="coachSummaryTitle">
             <span class="summary-label">这次先看一个问题</span>
@@ -231,7 +227,7 @@
       <div class="playback-panel">
         <div class="shared-timeline"><input id="sharedProgress" type="range" min="0" max="32" step="0.01" value="0" aria-label="共享视频进度" /><div class="timeline-overlay" id="timelineOverlay"></div></div>
         <div class="timeline-meta"><output id="sharedTime">00:00 / 00:32</output><span id="activeNodeLabel">尚未生成差异节点</span></div>
-        <div class="playback-controls"><button class="control-button" type="button" id="stepBack" aria-label="后退 0.03 秒">−0.03s</button><button class="control-button play" type="button" id="sharedPlay" aria-label="播放双视频">▶</button><button class="control-button" type="button" id="stepForward" aria-label="前进 0.03 秒">+0.03s</button><button class="control-button speed-button" type="button" id="playbackRate" aria-label="切换播放速度">速度 1×</button><button class="control-button audio-button active" type="button" id="teacherAudioToggle" aria-label="关闭老师视频声音" aria-pressed="true">老师声音：开</button><button class="control-button audio-button" type="button" id="userAudioToggle" aria-label="开启我的视频声音" aria-pressed="false">我的声音：关</button></div>
+        <div class="playback-controls"><button class="control-button" type="button" id="stepBack" aria-label="后退 0.03 秒">−0.03s</button><button class="control-button play" type="button" id="sharedPlay" aria-label="播放双视频">▶</button><button class="control-button" type="button" id="stepForward" aria-label="前进 0.03 秒">+0.03s</button><button class="control-button speed-button" type="button" id="playbackRate" aria-label="切换播放速度">速度 1×</button></div>
       </div>
     </section>
 

@@ -92,12 +92,13 @@ Redis / BullMQ ── Worker
 4. 双侧 tracker 锁定同一目标；不可信时记录 tracking gap，不静默换人。
 5. 姿态阶段使用稳定错误码区分 `pose_video_read_failed`、`pose_frame_extraction_failed`、`pose_model_load_failed`、`pose_inference_failed`、`pose_not_detected` 和 `pose_insufficient_frames`，日志只记录角色、视频尺寸、时长、帧数、有效率和失败阶段。
 6. 分析过程使用固定唯一 `stepId`；高频推理进度和服务端轮询只更新原步骤，任务成功、失败、取消或离开页面时清理监听和绘制循环。
-7. 老师和用户各自使用独立 Canvas，根据视频 `object-fit: contain` 的内容区域换算坐标，并使用真实连续帧绘制关键点、骨架、手腕和脚踝轨迹。
-8. 对比播放默认开启老师音轨并静音用户音轨；用户可主动切换音频焦点，但同一时间只保留一个可听音轨。
-9. H5 输出无评分的 `structuredAnalysis`，服务端再次运行时校验。
-10. Worker 先生成确定性的规则报告，再调用 DeepSeek 改写教练文案。
-11. Flash 失败后尝试 Pro；全部失败或输出无效时返回规则报告，任务状态为 `fallback`。
-10. 模型只能改变文案，不得改变问题数量、时间区间、严重度和证据。
+7. 老师和用户各自使用独立 Canvas，根据视频 `object-fit: contain` 的内容区域换算坐标，并使用真实连续帧绘制关键点、骨架、手腕和脚踝轨迹；播放时覆盖层最高 15fps、设备像素比最高按 2 处理，轨迹窗口使用二分索引，避免遮挡视频解码。
+8. 对比播放固定使用老师音轨并始终静音用户音轨；播放、暂停、拖动和倍速不会改变该规则。
+9. 双视频同步检查最高 10Hz，时间轴 UI 最高约 15Hz；视频解码、同步校正、Canvas 覆盖层和 UI 更新使用独立节奏。
+10. H5 输出无评分的 `structuredAnalysis`，服务端再次运行时校验。
+11. Worker 先生成确定性的规则报告，再调用 DeepSeek 改写教练文案。
+12. Flash 失败后尝试 Pro；全部失败或输出无效时返回规则报告，任务状态为 `fallback`。
+13. 模型只能改变文案，不得改变问题数量、时间区间、严重度和证据。
 
 ## 5. API
 

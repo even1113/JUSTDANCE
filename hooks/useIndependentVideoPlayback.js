@@ -8,23 +8,23 @@ const DEFAULT_FPS = 30
 const SOFT_SYNC_THRESHOLD_SEC = 0.035
 const HARD_SYNC_THRESHOLD_SEC = 0.1
 const MAX_RATE_CORRECTION = 0.015
+const SYNC_INTERVAL_MS = 100
+const UI_UPDATE_INTERVAL_MS = 66
+const RATE_EPSILON = 0.001
 
 function createIndependentVideoPlayback({
   teacherVideoRef,
   userVideoRef,
   onTimeUpdate = () => {},
   onPlaybackChange = () => {},
-  onAudioChange = () => {},
 }) {
   let alignment = null
   let playbackRate = 1
   let isPlaying = false
   let frameRequestId = null
   let cleanupFns = []
-  const audioState = {
-    teacherMuted: false,
-    userMuted: true,
-  }
+  let lastSyncAt = -Infinity
+  let lastUiUpdateAt = -Infinity
 
   function refresh() {
     cleanupListeners()
@@ -35,7 +35,7 @@ function createIndependentVideoPlayback({
 
     teacher.controls = false
     user.controls = false
-    applyAudioState()
+    enforceAudioFocus()
     teacher.playsInline = true
     user.playsInline = true
 
@@ -44,48 +44,26 @@ function createIndependentVideoPlayback({
       listen(teacher, 'pause', handleTeacherPause),
       listen(teacher, 'seeked', () => publishTime()),
       listen(user, 'seeked', () => publishTime()),
+      listen(teacher, 'volumechange', enforceAudioFocus),
+      listen(user, 'volumechange', enforceAudioFocus),
     ]
     applyPlaybackRates()
     publishTime()
-    publishAudioState()
   }
 
-  function setMuted(role, muted) {
-    if (!['teacher', 'user'].includes(role)) return
-    const key = `${role}Muted`
-    audioState[key] = Boolean(muted)
-
-    if (!muted) {
-      const otherRole = role === 'teacher' ? 'user' : 'teacher'
-      audioState[`${otherRole}Muted`] = true
-    }
-
-    applyAudioState()
-    publishAudioState()
-  }
-
-  function toggleMuted(role) {
-    const key = `${role}Muted`
-    setMuted(role, !audioState[key])
-  }
-
-  function applyAudioState() {
+  function enforceAudioFocus() {
     const teacher = teacherVideoRef.current
     const user = userVideoRef.current
     if (teacher) {
-      teacher.muted = audioState.teacherMuted
+      teacher.muted = false
       teacher.defaultMuted = false
       if (teacher.volume === 0) teacher.volume = 1
     }
     if (user) {
-      user.muted = audioState.userMuted
+      user.muted = true
       user.defaultMuted = true
       if (user.volume === 0) user.volume = 1
     }
-  }
-
-  function publishAudioState() {
-    onAudioChange({ ...audioState })
   }
 
   function setAlignment(nextAlignment) {
@@ -130,6 +108,7 @@ function createIndependentVideoPlayback({
     const current = getCommonTime()
     if (current >= getDuration() - 0.04) seekCommon(0)
 
+    enforceAudioFocus()
     syncUserToTeacher(true)
     applyPlaybackRates()
     isPlaying = true
@@ -152,6 +131,7 @@ function createIndependentVideoPlayback({
     teacherVideoRef.current?.pause()
     userVideoRef.current?.pause()
     stopMonitor()
+    enforceAudioFocus()
     if (isPlaying) {
       isPlaying = false
       onPlaybackChange({ isPlaying, playbackRate })
@@ -168,6 +148,7 @@ function createIndependentVideoPlayback({
     const times = commonTimeToSourceTimes(alignment, commonTime)
     teacher.currentTime = clamp(times.teacherTime, 0, teacher.duration || times.teacherTime)
     user.currentTime = clamp(times.userTime, 0, user.duration || times.userTime)
+    enforceAudioFocus()
     applyPlaybackRates()
     publishTime(times.commonTime)
     if (wasPlaying) startMonitor()
@@ -180,6 +161,7 @@ function createIndependentVideoPlayback({
 
   function setPlaybackRate(nextRate) {
     playbackRate = clamp(Number(nextRate) || 1, 0.25, 2)
+    enforceAudioFocus()
     applyPlaybackRates()
     onPlaybackChange({ isPlaying, playbackRate })
   }
@@ -205,26 +187,26 @@ function createIndependentVideoPlayback({
     const correction = Math.abs(error) >= SOFT_SYNC_THRESHOLD_SEC
       ? clamp(error * 0.12, -MAX_RATE_CORRECTION, MAX_RATE_CORRECTION)
       : 0
-    user.playbackRate = clamp(
+    setPlaybackRateIfChanged(user, clamp(
       playbackRate * mappedRate + correction,
       playbackRate * (1 - MAX_RATE_CORRECTION),
       playbackRate * (1 + MAX_RATE_CORRECTION),
-    )
+    ))
   }
 
   function applyPlaybackRates() {
     const teacher = teacherVideoRef.current
     const user = userVideoRef.current
-    if (teacher) teacher.playbackRate = playbackRate
+    if (teacher) setPlaybackRateIfChanged(teacher, playbackRate)
     if (user) {
       const mappedRate = alignment
         ? localUserPlaybackRate(alignment, teacher?.currentTime || 0)
         : 1
-      user.playbackRate = clamp(
+      setPlaybackRateIfChanged(user, clamp(
         playbackRate * mappedRate,
         playbackRate * (1 - MAX_RATE_CORRECTION),
         playbackRate * (1 + MAX_RATE_CORRECTION),
-      )
+      ))
     }
   }
 
@@ -234,7 +216,10 @@ function createIndependentVideoPlayback({
     const teacher = teacherVideoRef.current
     if (!teacher) return
 
-    const update = () => {
+    lastSyncAt = -Infinity
+    lastUiUpdateAt = -Infinity
+
+    const update = (now = 0) => {
       if (!isPlaying) return
 
       const commonTime = getCommonTime()
@@ -242,9 +227,15 @@ function createIndependentVideoPlayback({
         pauseAll()
         seekCommon(getDuration())
         return
-      } else {
+      }
+
+      if (now - lastSyncAt >= SYNC_INTERVAL_MS) {
         syncUserToTeacher()
+        lastSyncAt = now
+      }
+      if (now - lastUiUpdateAt >= UI_UPDATE_INTERVAL_MS) {
         publishTime(commonTime)
+        lastUiUpdateAt = now
       }
 
       frameRequestId = requestNextFrame(teacher, update)
@@ -303,11 +294,13 @@ function createIndependentVideoPlayback({
     stepFrame,
     seekCommon,
     setPlaybackRate,
-    setMuted,
-    toggleMuted,
-    getAudioState: () => ({ ...audioState }),
     destroy,
   }
+}
+
+function setPlaybackRateIfChanged(video, nextRate) {
+  if (Math.abs((video.playbackRate || 0) - nextRate) < RATE_EPSILON) return
+  video.playbackRate = nextRate
 }
 
 function requestNextFrame(video, callback) {
@@ -328,5 +321,7 @@ function clamp(value, min, max) {
 
 export {
   HARD_SYNC_THRESHOLD_SEC,
+  SYNC_INTERVAL_MS,
+  UI_UPDATE_INTERVAL_MS,
   createIndependentVideoPlayback,
 }

@@ -1,0 +1,40 @@
+{
+  "name": "dancemirror",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "description": "AI舞蹈视频比对助手 - 即来即用H5",
+  "scripts": {
+    "build": "node build-site.js",
+    "cleanup": "node server/cleanup.js",
+    "cleanup:watch": "node server/cleanup-scheduler.js",
+    "dev:api": "node server.js",
+    "dev:worker": "node server/worker.js",
+    "lint": "eslint app.js server.js build-site.js components hooks services server scripts && htmlhint index.html && stylelint styles.css",
+    "load-test:media": "node scripts/media-load-test.js",
+    "migrate": "node server/db/migrate.js",
+    "prepare": "node scripts/prepare-mediapipe-assets.js",
+    "test": "vitest run",
+    "check": "npm run lint && npm run test",
+    "serve": "node server.js",
+    "start": "node server.js",
+    "worker": "node server/worker.js"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "eslint": "^9.0.0",
+    "globals": "^17.7.0",
+    "htmlhint": "^1.1.4",
+    "stylelint": "^16.0.0",
+    "stylelint-config-standard": "^36.0.0",
+    "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "^0.10.35",
+    "ali-oss": "^6.23.0",
+    "bullmq": "^5.80.8",
+    "dotenv": "^17.4.2",
+    "ioredis": "^5.11.1",
+    "pg": "^8.22.0"
+  }
+}

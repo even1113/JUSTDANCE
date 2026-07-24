@@ -1,0 +1,327 @@
+import {
+  commonTimeToSourceTimes,
+  localUserPlaybackRate,
+  sourceTimesToCommonTime,
+} from '../services/audioAlignment.js'
+
+const DEFAULT_FPS = 30
+const SOFT_SYNC_THRESHOLD_SEC = 0.035
+const HARD_SYNC_THRESHOLD_SEC = 0.1
+const MAX_RATE_CORRECTION = 0.015
+const SYNC_INTERVAL_MS = 100
+const UI_UPDATE_INTERVAL_MS = 66
+const RATE_EPSILON = 0.001
+
+function createIndependentVideoPlayback({
+  teacherVideoRef,
+  userVideoRef,
+  onTimeUpdate = () => {},
+  onPlaybackChange = () => {},
+}) {
+  let alignment = null
+  let playbackRate = 1
+  let isPlaying = false
+  let frameRequestId = null
+  let cleanupFns = []
+  let lastSyncAt = -Infinity
+  let lastUiUpdateAt = -Infinity
+
+  function refresh() {
+    cleanupListeners()
+
+    const teacher = teacherVideoRef.current
+    const user = userVideoRef.current
+    if (!teacher || !user) return
+
+    teacher.controls = false
+    user.controls = false
+    enforceAudioFocus()
+    teacher.playsInline = true
+    user.playsInline = true
+
+    cleanupFns = [
+      listen(teacher, 'ended', pauseAll),
+      listen(teacher, 'pause', handleTeacherPause),
+      listen(teacher, 'seeked', () => publishTime()),
+      listen(user, 'seeked', () => publishTime()),
+      listen(teacher, 'volumechange', enforceAudioFocus),
+      listen(user, 'volumechange', enforceAudioFocus),
+    ]
+    applyPlaybackRates()
+    publishTime()
+  }
+
+  function enforceAudioFocus() {
+    const teacher = teacherVideoRef.current
+    const user = userVideoRef.current
+    if (teacher) {
+      teacher.muted = false
+      teacher.defaultMuted = false
+      if (teacher.volume === 0) teacher.volume = 1
+    }
+    if (user) {
+      user.muted = true
+      user.defaultMuted = true
+      if (user.volume === 0) user.volume = 1
+    }
+  }
+
+  function setAlignment(nextAlignment) {
+    alignment = nextAlignment
+    const duration = getDuration()
+    if (duration <= 0) {
+      pauseAll()
+      return
+    }
+
+    const current = clamp(getCommonTime(), 0, duration)
+    seekCommon(current)
+  }
+
+  function getAlignment() {
+    return alignment
+  }
+
+  function getDuration() {
+    return Math.max(0, Number(alignment?.timeline?.duration) || 0)
+  }
+
+  function getCommonTime() {
+    const teacher = teacherVideoRef.current
+    if (!teacher || !alignment) return 0
+    return sourceTimesToCommonTime(alignment, teacher.currentTime || 0)
+  }
+
+  function playPause() {
+    if (isPlaying) {
+      pauseAll()
+      return Promise.resolve()
+    }
+    return play()
+  }
+
+  async function play() {
+    const teacher = teacherVideoRef.current
+    const user = userVideoRef.current
+    if (!teacher || !user || !alignment || getDuration() <= 0) return
+
+    const current = getCommonTime()
+    if (current >= getDuration() - 0.04) seekCommon(0)
+
+    enforceAudioFocus()
+    syncUserToTeacher(true)
+    applyPlaybackRates()
+    isPlaying = true
+    onPlaybackChange({ isPlaying, playbackRate })
+    startMonitor()
+
+    const results = await Promise.allSettled([teacher.play(), user.play()])
+    if (results.some((result) => result.status === 'rejected')) {
+      pauseAll()
+      throw new Error('浏览器阻止了视频播放，请再次点击播放按钮。')
+    }
+  }
+
+  function handleTeacherPause() {
+    if (!isPlaying) return
+    pauseAll()
+  }
+
+  function pauseAll() {
+    teacherVideoRef.current?.pause()
+    userVideoRef.current?.pause()
+    stopMonitor()
+    enforceAudioFocus()
+    if (isPlaying) {
+      isPlaying = false
+      onPlaybackChange({ isPlaying, playbackRate })
+    }
+    publishTime()
+  }
+
+  function seekCommon(commonTime) {
+    const teacher = teacherVideoRef.current
+    const user = userVideoRef.current
+    if (!teacher || !user || !alignment) return
+
+    const wasPlaying = isPlaying
+    const times = commonTimeToSourceTimes(alignment, commonTime)
+    teacher.currentTime = clamp(times.teacherTime, 0, teacher.duration || times.teacherTime)
+    user.currentTime = clamp(times.userTime, 0, user.duration || times.userTime)
+    enforceAudioFocus()
+    applyPlaybackRates()
+    publishTime(times.commonTime)
+    if (wasPlaying) startMonitor()
+  }
+
+  function stepFrame(delta, fps = DEFAULT_FPS) {
+    pauseAll()
+    seekCommon(getCommonTime() + delta / fps)
+  }
+
+  function setPlaybackRate(nextRate) {
+    playbackRate = clamp(Number(nextRate) || 1, 0.25, 2)
+    enforceAudioFocus()
+    applyPlaybackRates()
+    onPlaybackChange({ isPlaying, playbackRate })
+  }
+
+  function syncUserToTeacher(force = false) {
+    const teacher = teacherVideoRef.current
+    const user = userVideoRef.current
+    if (!teacher || !user || !alignment) return
+
+    const expectedUserTime = commonTimeToSourceTimes(
+      alignment,
+      sourceTimesToCommonTime(alignment, teacher.currentTime || 0),
+    ).userTime
+    const error = expectedUserTime - (user.currentTime || 0)
+
+    if (force || Math.abs(error) >= HARD_SYNC_THRESHOLD_SEC) {
+      user.currentTime = clamp(expectedUserTime, 0, user.duration || expectedUserTime)
+      applyPlaybackRates()
+      return
+    }
+
+    const mappedRate = localUserPlaybackRate(alignment, teacher.currentTime || 0)
+    const correction = Math.abs(error) >= SOFT_SYNC_THRESHOLD_SEC
+      ? clamp(error * 0.12, -MAX_RATE_CORRECTION, MAX_RATE_CORRECTION)
+      : 0
+    setPlaybackRateIfChanged(user, clamp(
+      playbackRate * mappedRate + correction,
+      playbackRate * (1 - MAX_RATE_CORRECTION),
+      playbackRate * (1 + MAX_RATE_CORRECTION),
+    ))
+  }
+
+  function applyPlaybackRates() {
+    const teacher = teacherVideoRef.current
+    const user = userVideoRef.current
+    if (teacher) setPlaybackRateIfChanged(teacher, playbackRate)
+    if (user) {
+      const mappedRate = alignment
+        ? localUserPlaybackRate(alignment, teacher?.currentTime || 0)
+        : 1
+      setPlaybackRateIfChanged(user, clamp(
+        playbackRate * mappedRate,
+        playbackRate * (1 - MAX_RATE_CORRECTION),
+        playbackRate * (1 + MAX_RATE_CORRECTION),
+      ))
+    }
+  }
+
+  function startMonitor() {
+    stopMonitor()
+
+    const teacher = teacherVideoRef.current
+    if (!teacher) return
+
+    lastSyncAt = -Infinity
+    lastUiUpdateAt = -Infinity
+
+    const update = (now = 0) => {
+      if (!isPlaying) return
+
+      const commonTime = getCommonTime()
+      if (commonTime >= getDuration() - 0.015) {
+        pauseAll()
+        seekCommon(getDuration())
+        return
+      }
+
+      if (now - lastSyncAt >= SYNC_INTERVAL_MS) {
+        syncUserToTeacher()
+        lastSyncAt = now
+      }
+      if (now - lastUiUpdateAt >= UI_UPDATE_INTERVAL_MS) {
+        publishTime(commonTime)
+        lastUiUpdateAt = now
+      }
+
+      frameRequestId = requestNextFrame(teacher, update)
+    }
+
+    frameRequestId = requestNextFrame(teacher, update)
+  }
+
+  function stopMonitor() {
+    const teacher = teacherVideoRef.current
+    if (frameRequestId === null || !teacher) return
+
+    if (teacher.cancelVideoFrameCallback && typeof frameRequestId === 'number') {
+      teacher.cancelVideoFrameCallback(frameRequestId)
+    } else {
+      window.cancelAnimationFrame(frameRequestId)
+    }
+    frameRequestId = null
+  }
+
+  function publishTime(forcedTime = null) {
+    const commonTime = forcedTime ?? getCommonTime()
+    const teacher = teacherVideoRef.current
+    const user = userVideoRef.current
+    const times = alignment
+      ? commonTimeToSourceTimes(alignment, commonTime)
+      : { teacherTime: teacher?.currentTime || 0, userTime: user?.currentTime || 0 }
+
+    onTimeUpdate({
+      commonTime,
+      duration: getDuration(),
+      teacherTime: times.teacherTime,
+      userTime: times.userTime,
+      syncErrorSec: user ? (user.currentTime || 0) - times.userTime : 0,
+    })
+  }
+
+  function cleanupListeners() {
+    cleanupFns.forEach((dispose) => dispose())
+    cleanupFns = []
+  }
+
+  function destroy() {
+    pauseAll()
+    cleanupListeners()
+  }
+
+  return {
+    refresh,
+    setAlignment,
+    getAlignment,
+    getDuration,
+    getCommonTime,
+    playPause,
+    pauseAll,
+    stepFrame,
+    seekCommon,
+    setPlaybackRate,
+    destroy,
+  }
+}
+
+function setPlaybackRateIfChanged(video, nextRate) {
+  if (Math.abs((video.playbackRate || 0) - nextRate) < RATE_EPSILON) return
+  video.playbackRate = nextRate
+}
+
+function requestNextFrame(video, callback) {
+  if (video.requestVideoFrameCallback) {
+    return video.requestVideoFrameCallback(callback)
+  }
+  return window.requestAnimationFrame(callback)
+}
+
+function listen(target, eventName, handler) {
+  target.addEventListener(eventName, handler)
+  return () => target.removeEventListener(eventName, handler)
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value))
+}
+
+export {
+  HARD_SYNC_THRESHOLD_SEC,
+  SYNC_INTERVAL_MS,
+  UI_UPDATE_INTERVAL_MS,
+  createIndependentVideoPlayback,
+}

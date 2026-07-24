@@ -1,0 +1,50 @@
+services:
+  api:
+    environment:
+      NODE_ENV: production
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?set PUBLIC_BASE_URL}
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-oss}
+      OSS_REGION: ${OSS_REGION:-oss-cn-shenzhen}
+      OSS_BUCKET: ${OSS_BUCKET:-}
+      OSS_ACCESS_KEY_ID: ${OSS_ACCESS_KEY_ID:-}
+      OSS_ACCESS_KEY_SECRET: ${OSS_ACCESS_KEY_SECRET:-}
+      OSS_INTERNAL: ${OSS_INTERNAL:-true}
+      MEDIA_SIGNING_SECRET: ${MEDIA_SIGNING_SECRET:?set MEDIA_SIGNING_SECRET}
+    ports:
+      - "127.0.0.1:${APP_PORT:-5173}:5173"
+
+  worker:
+    environment:
+      NODE_ENV: production
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-oss}
+      OSS_REGION: ${OSS_REGION:-oss-cn-shenzhen}
+      OSS_BUCKET: ${OSS_BUCKET:-}
+      OSS_ACCESS_KEY_ID: ${OSS_ACCESS_KEY_ID:-}
+      OSS_ACCESS_KEY_SECRET: ${OSS_ACCESS_KEY_SECRET:-}
+      OSS_INTERNAL: ${OSS_INTERNAL:-true}
+      MEDIA_SIGNING_SECRET: ${MEDIA_SIGNING_SECRET:?set MEDIA_SIGNING_SECRET}
+
+  cleanup:
+    environment:
+      NODE_ENV: production
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-oss}
+      OSS_REGION: ${OSS_REGION:-oss-cn-shenzhen}
+      OSS_BUCKET: ${OSS_BUCKET:-}
+      OSS_ACCESS_KEY_ID: ${OSS_ACCESS_KEY_ID:-}
+      OSS_ACCESS_KEY_SECRET: ${OSS_ACCESS_KEY_SECRET:-}
+      OSS_INTERNAL: ${OSS_INTERNAL:-true}
+      MEDIA_SIGNING_SECRET: ${MEDIA_SIGNING_SECRET:?set MEDIA_SIGNING_SECRET}
+
+  nginx:
+    image: nginx:1.27-alpine
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?set APP_DOMAIN}
+    ports:
+      - "80:80"
+    volumes:
+      - ./deploy/nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./deploy/certbot/www:/var/www/certbot:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped

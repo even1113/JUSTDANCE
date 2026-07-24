@@ -13,13 +13,13 @@
 
 - 检查 API/Worker/Cleanup 重启次数和错误率。
 - 检查 BullMQ waiting/failed 数量和最老任务等待时间。
-- 检查磁盘、PostgreSQL、Redis AOF 和 OSS 费用。
+- 检查腾讯云轻量应用服务器磁盘、PostgreSQL 和 Redis AOF；若启用 OSS，再检查 OSS 费用。
 - 检查 DeepSeek success/fallback 比例，不查看用户内容。
 
 ## 每周
 
 - 抽查过期 session 是否在 24–26 小时窗口内清理。
-- 验证 OSS `sessions/` 下没有超过 2 天的遗留对象。
+- 验证本地媒体目录没有超过 2 天的遗留文件；若切换 OSS，再验证 OSS `sessions/` 下的遗留对象。
 - 验证 PostgreSQL 备份可读取；定期做恢复演练。
 - 审查 RAM、SSH、安全组和管理员权限。
 

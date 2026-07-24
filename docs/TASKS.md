@@ -13,7 +13,7 @@
 
 ## 当前阶段
 
-当前已经从“阶段 0：H5 可交互 Demo”进入“阶段 1：H5 + 受控后端分析 API”的实现期。Demo 仍作为产品流与异常状态评审入口，不等同于正式 MVP 已完成。
+当前已经从“阶段 0：H5 可交互 Demo”进入“阶段 2：真实 H5 + 受控后端分析链路的 Beta 验收期”。Demo 仍作为产品流与异常状态评审入口，不等同于正式 Beta 已完成。
 
 详细的需求追踪、架构和任务状态位于：
 
@@ -29,19 +29,18 @@
 
 ## Task 1: Report v1 运行时契约 ✅
 
-- 模型、Mock 和 fallback 使用同一份版本化 schema。
+- 测试 fixture、模型输出和 fallback 使用同一份版本化 schema。
 - 约束 1–3 个问题、连续优先级、合法时间区间和非评分输出。
 - 无效 provider 输出使用稳定 `report_schema_invalid` 错误。
 
 ## Task 2: 受控会话与分析任务 API ✅
 
 - 匿名会话凭证、任务查询、取消、stale 和删除已实现。
-- 当前使用显式开发 provider；它只用于验证 API 与状态契约。
-- 真实上传、转码、分析和模型 provider 尚未接入。
+- 真实上传、转码、分析和模型 provider 已接入；持久化与云资源仍需环境联调。
 
 ## Task 3: H5 API Client ✅
 
-- 将开发 provider 与前端消费接口解耦。
+- 将服务端 provider 与前端消费接口解耦。
 - 本地与生产模式都通过同源 `/api/...` 驱动真实任务，不保留 Mock 演示入口。
 - 取消和删除必须调用后端，迟到结果不得回写。
 
@@ -69,9 +68,9 @@
 
 ## Task 7: Beta 验收 ⛔ 外部依赖
 
-- 上传、替换、取消、删除、多人、手动校准、模型 fallback 全链路验证。
-- iPhone Safari、Android Chrome、微信内置浏览器实机验证。
-- `npm run check`、`npm run build` 和端到端测试全部通过。
+- 上传、替换、取消、删除、多人、手动校准、模型 fallback 全链路验证仍待外部素材和环境。
+- iPhone Safari、Android Chrome、微信内置浏览器实机验证仍待完成。
+- `npm run check` 和 `npm run build` 已通过；端到端实机测试仍待完成。
 
 ## 当前外部依赖
 
@@ -79,4 +78,4 @@
 - DeepSeek v4 Flash 已用本地环境变量完成非敏感结构化冒烟；真实 Key 未输出、未提交。
 - FFmpeg/FFprobe 已完成合成视频上传、媒体校验和转码冒烟。
 - 当前机器没有 Docker，PostgreSQL/Redis/Compose 运行验收需在具备 Docker 的机器执行。
-- 自动多人代表帧候选、其余 3–5 组真实视频、手机实机和阿里云生产依赖验收仍待完成。
+- 自动多人代表帧候选、其余 3–5 组真实视频和手机实机验收仍待完成；腾讯云轻量应用服务器上的 `persistent + local` 部署已完成。

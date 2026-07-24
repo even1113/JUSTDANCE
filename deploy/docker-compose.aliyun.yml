@@ -43,6 +43,7 @@ services:
       - "80:80"
     volumes:
       - ./deploy/nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./deploy/certbot/www:/var/www/certbot:ro
     depends_on:
       api:
         condition: service_healthy

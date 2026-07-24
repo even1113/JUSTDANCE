@@ -17,7 +17,7 @@
 - Worker：FFmpeg 媒体准备和 DeepSeek/规则报告生成。
 - PostgreSQL：匿名会话、视频索引、结构化动作结果、任务与最终报告。
 - Redis/BullMQ：可重试、可持久化的媒体和分析任务。
-- 存储：开发环境使用本地磁盘；生产使用阿里云深圳私有 OSS Bucket。
+- 存储：开发和当前生产环境使用本地磁盘；私有 OSS 是可选存储适配器，尚未作为当前生产部署前置条件。
 - 模型：DeepSeek 官方 OpenAI-compatible API，Flash 为主、Pro 为备用。
 
 正式模式不会把原始视频、视频 URL、抽帧、关键点或模型 Key发送给 DeepSeek。
@@ -172,7 +172,7 @@ DEEPSEEK_API_KEY=secret
 docker compose up -d --build
 ```
 
-阿里云单机 Beta：
+腾讯云轻量应用服务器单机 Beta：
 
 ```bash
 docker compose --env-file .env \
@@ -181,9 +181,9 @@ docker compose --env-file .env \
   up -d --build
 ```
 
-初期为 1 个 API、1 个 Worker（并发 1–2）、1 个 Cleanup、PostgreSQL 和 Redis。不要在真实视频压测前建设集群。TLS 推荐由阿里云 ALB/SLB 或已备案域名证书终止，再转发到 Nginx。
+当前部署为 1 个 API、1 个 Worker（并发 1–2）、1 个 Cleanup、PostgreSQL 和 Redis，运行在腾讯云轻量应用服务器。不要在真实视频压测前建设集群。TLS 可由服务器上的 Nginx 和已备案域名证书终止。
 
-详细步骤见 `docs/DEPLOY_ALIYUN.md`。
+详细步骤见 `docs/DEPLOY_ALIYUN.md`（文件名保留历史命名，内容为腾讯云轻量应用服务器部署）。
 
 ## 10. 质量门槛
 
@@ -201,4 +201,4 @@ docker compose --env-file .env \
 - Pose Landmarker 配置为每帧最多 4 人，返回多个人体检测但不提供跨帧 ReID；密集多人场景仍依赖手动框选、姿态签名和短暂丢失恢复。
 - 姿态识别和音轨对齐仍在浏览器执行，低端手机的耗时和内存需真实压测。
 - 当前开发机没有 Docker，容器文件只能做静态验证，需在具备 Docker 的机器完成运行验收。
-- 已有 ECS 公网环境；正式域名、HTTPS、OSS/RDS/Redis 的完整生产验收仍待完成。
+- 腾讯云轻量应用服务器已完成部署和基础冒烟；当前生产使用 `persistent + local`。OSS、RDS/托管 Redis 和多端真实视频验收属于后续优化或外部验收项。

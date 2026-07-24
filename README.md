@@ -1,8 +1,51 @@
 # DanceMirror
 
-DanceMirror 是一个无登录、即来即用的 H5 舞蹈视频复盘助手。用户上传老师示范和自己的练习视频，系统统一视频格式、对齐音乐、锁定目标人物，找出最明显的动作差异并生成可执行的教练式建议。
+DanceMirror 是一个无登录、移动端优先的 H5 舞蹈视频复盘助手。用户上传老师示范视频和自己的练习视频，系统完成视频校验与转码、音轨对齐、人物锁定、姿态分析和差异报告，帮助用户定位最值得优先改进的动作，并回到对应时间点复看。
 
-当前仓库已经进入真实实现阶段，所有入口都使用真实上传、FFmpeg 转码、结构化动作分析、DeepSeek 和规则报告降级链路；演示素材与 Mock 场景入口已移除。
+当前版本已完成真实用户闭环：上传 → 媒体处理 → 对齐与人物选择 → 姿态和动作差异分析 → 报告生成 → 时间点回看。页面不提供演示素材、Mock 报告或客户端模型 Key。
+
+线上地址：[https://dancemirror.blueven.cn/](https://dancemirror.blueven.cn/)
+
+## 核心功能
+
+- 老师视频和练习视频双上传，支持 MP4/MOV，单文件最大 500MB、最长 3 分钟；
+- 服务端校验真实媒体信息，并使用 FFmpeg 转为 H.264 + AAC、最高 1080p/30fps；
+- 老师音轨作为公共时间轴基准，自动对齐失败时支持手动校准；
+- 双侧人物手动框选、连续跟踪和追踪丢失区间保护；
+- 浏览器端使用本地 MediaPipe Pose、Web Audio 和 DTW 完成姿态与动作差异分析；
+- 双视频独立播放和姿态 Canvas，老师视频提供声音，练习视频保持静音；
+- 输出 1–3 个带时间区间的非评分式问题、依据摘要和可执行练习建议；
+- DeepSeek 结构化报告改写失败时自动降级为规则报告；
+- 匿名 session、取消、替换、stale 结果隔离和“删除本次数据”；
+- 持久化任务由 PostgreSQL、Redis/BullMQ、Worker 和 Cleanup 共同处理。
+
+## 技术架构
+
+```text
+移动端 H5
+  ├─ 本地视频预览
+  ├─ Web Audio 对齐
+  ├─ MediaPipe Pose + 目标跟踪
+  ├─ DTW 差异分析
+  └─ 结构化动作分析结果
+          │
+          ▼
+Node.js API ───── PostgreSQL
+  │                  会话、视频索引、任务和报告
+  ├─ 签名上传 / 短期播放 URL
+  ├─ 本地磁盘或私有 OSS 存储适配器
+  └─ Redis/BullMQ ── Worker
+                       ├─ FFprobe / FFmpeg 媒体处理
+                       ├─ DeepSeek Flash → Pro
+                       └─ 规则报告 fallback
+```
+
+运行模式：
+
+- `embedded`：本地开发模式，使用内存任务状态和本地磁盘，不需要 Docker；
+- `persistent`：生产模式，使用 PostgreSQL、Redis、独立 Worker、Cleanup 和持久化媒体存储。
+
+模型服务只接收经过校验的结构化动作差异，不接收原始视频、视频 URL、帧、关键点或用户文件。API Key 只通过服务端环境变量注入。
 
 ## 本地启动
 
@@ -14,33 +57,18 @@ copy .env.example .env
 npm run serve
 ```
 
-访问 `http://127.0.0.1:5173`。默认 `RUNTIME_MODE=embedded`，使用内存任务状态和 `data/` 下的本地磁盘，不依赖 Docker；重启后任务不会保留。
+访问 `http://127.0.0.1:5173`。浏览器 API 始终使用同源 `/api/...`，不读取 `API_BASE_URL` 或 Vite 变量。
 
-浏览器端不读取 `API_BASE_URL` 或 Vite 变量，所有 API 与本地媒体上传都使用同源 `/api/...`。`PUBLIC_BASE_URL` 只描述服务对外地址，不参与本地存储签名 URL 的拼接。
-
-不要把 `.env`、真实测试视频或媒体临时文件提交到 Git。
-
-## 持久化 Docker 环境
+## 持久化环境
 
 ```bash
 docker compose up -d --build
 docker compose ps
 ```
 
-该模式启动：
+生产环境使用独立的 `deploy/.env.production`（模板为 `deploy/.env.production.example`），不要复用本地根目录 `.env`。当前线上部署在腾讯云轻量应用服务器，运行 `persistent + local`，具体步骤见 [腾讯云轻量应用服务器部署说明](docs/DEPLOY_ALIYUN.md)。该文件名保留历史命名，内容以腾讯云部署为准。
 
-- 1 个 API；
-- 1 个 Worker，默认并发 2；
-- PostgreSQL；
-- Redis/BullMQ；
-- 24 小时数据清理进程；
-- 本地共享媒体卷。
-
-生产环境使用独立的 `deploy/.env.production`（模板为 `deploy/.env.production.example`），不要复用本地根目录 `.env`。当前生产部署运行在腾讯云轻量应用服务器，部署步骤见 [docs/DEPLOY_ALIYUN.md](docs/DEPLOY_ALIYUN.md)（文件名保留历史命名）。
-
-## DeepSeek
-
-服务端使用 DeepSeek 官方 OpenAI-compatible API：
+## DeepSeek 配置
 
 ```text
 DEEPSEEK_BASE_URL=https://api.deepseek.com
@@ -49,24 +77,7 @@ DEEPSEEK_FALLBACK_MODEL=deepseek-v4-pro
 DEEPSEEK_API_KEY=...
 ```
 
-模型只接收经过校验的结构化动作差异，不接收原始视频、视频 URL、帧、关键点或用户文件。Flash 失败后会尝试 Pro；模型失败或输出无效时返回规则报告并标记 `fallback`。
-
-## 核心能力
-
-- MP4/MOV、500MB、3 分钟的客户端与服务端双重校验；
-- 签名直传，本地磁盘与可选私有 OSS 两种适配器；
-- FFmpeg 转为 H.264 + AAC、最高 1080p/30fps；
-- 老师音轨强校验，用户无音轨时支持手动校准；
-- 双侧人物手动框选、连续跟踪与丢失区间保护；
-- Web Audio 对齐、公共时间轴、真实 MediaPipe Pose、DTW 差异分析；
-- 双视频独立姿态 Canvas，显示关键点、骨架以及手腕和脚踝连续轨迹；
-- 播放固定使用老师音轨、用户视频静音；同步校正、时间轴 UI 和姿态 Canvas 分频执行；
-- 使用唯一 `stepId` 记录模型、双视频推理、差异和报告阶段，失败时明确标记未执行步骤；
-- 1–3 个非评分式问题、时间轴节点和 Report v1 运行时校验；
-- DeepSeek v4 Flash/Pro 和规则报告降级；
-- 匿名 session token、取消、stale、替换和“删除本次数据”；
-- PostgreSQL、Redis 持久化任务与 24 小时自动清理；
-- 移动端优先，MediaPipe 运行时和模型本地化，不依赖页面运行时 CDN。
+Flash 失败后会尝试 Pro；模型请求失败或输出不符合 Report v1 schema 时，系统返回规则报告并标记 `fallback`。
 
 ## 开发命令
 
@@ -82,39 +93,30 @@ npm run check          # lint + test
 npm run build
 ```
 
-## 目录
+## 目录结构
 
 ```text
 index.html / styles.css / app.js  H5 入口、样式和编排
 components/ hooks/ services/      播放、姿态、对齐、报告与 API client
 server/                            API、存储、数据库、队列、媒体和模型 Worker
-scripts/                           构建资源与压测脚本
-deploy/                            轻量服务器 Compose、Nginx 和部署脚本
+scripts/                           构建资源与媒体压测脚本
+deploy/                            服务器 Compose、Nginx 和部署脚本
 docs/                              PRD、设计、技术、AI 与运维文档
 tests/                             contract、unit、integration 测试
-.spec-workflow/                    SDD requirements/design/tasks
 ```
 
 ## 数据与安全
 
-- 当前生产视频使用腾讯云轻量应用服务器本地私有磁盘和短期签名 URL；视频二进制不进入 PostgreSQL。
-- 任务完成后默认保留 24 小时，Cleanup 主动清理，OSS 生命周期只兜底。
-- “删除本次数据”覆盖原视频、转码、音频、中间结果、任务和报告。
-- `.env`、测试视频、`data/`、媒体和临时文件均由 `.gitignore` 排除。
-
-## 当前限制
-
-- 自动多人代表帧候选尚未完成，当前支持自动主目标与双侧手动框选。
-- Pose Landmarker 每帧最多返回 4 个候选；密集多人场景没有完整 ReID，仍需手动框选并允许短暂跟踪丢失。
-- 首版音轨和姿态分析在浏览器执行，低端手机性能需要 3–5 组真实视频压测。
-- 当前开发机没有 Docker；容器配置尚需在具备 Docker 的机器完成运行验收。
-- 2026-07-24 已完成腾讯云轻量应用服务器部署；当前生产形态为 `persistent + local`。OSS、RDS/托管 Redis 属于后续可选迁移，不是当前部署前置条件。
+- 当前生产视频存储在腾讯云轻量应用服务器的本地私有磁盘，播放使用短期签名 URL；
+- 任务完成后默认保留 24 小时，由 Cleanup 主动清理；
+- “删除本次数据”覆盖原视频、转码文件、音频、中间结果、任务和报告；
+- `.env`、真实测试视频、`data/`、媒体和临时文件均由 `.gitignore` 排除。
 
 ## 文档
 
 - [PRD](docs/PRD.md)
-- [Tech Spec](docs/TECH_SPEC.md)
-- [AI Spec](docs/AI_SPEC.md)
-- [Tencent Lighthouse Deployment](docs/DEPLOY_ALIYUN.md)
-- [Tasks](docs/TASKS.md)
+- [技术规格](docs/TECH_SPEC.md)
+- [AI 规格](docs/AI_SPEC.md)
+- [腾讯云部署说明](docs/DEPLOY_ALIYUN.md)
+- [任务清单](docs/TASKS.md)
 - [AGENTS.md](AGENTS.md)

@@ -50,10 +50,12 @@
               </button>
               <div class="upload-preview hidden" id="teacherUploadPreview">
                 <div class="mini-video-frame">
-                  <video muted playsinline preload="metadata"></video><div class="demo-pose hidden" data-demo-pose></div>
-                  <span class="upload-success-note">✓ 上传成功</span>
+                  <video muted playsinline preload="metadata"></video>
+                  <span class="upload-success-note">正在准备</span>
                 </div>
                 <div class="upload-file-copy"><strong></strong><small></small></div>
+                <progress class="upload-progress hidden" id="teacherUploadProgress" max="100" value="0" aria-label="老师视频上传进度"></progress>
+                <button class="upload-retry hidden" type="button" data-retry-upload="teacher">重新上传</button>
                 <button class="icon-button danger" type="button" data-remove-video="teacher" aria-label="删除老师视频">×</button>
               </div>
               <p class="field-message" id="teacherFieldMessage" role="status"></p>
@@ -72,10 +74,12 @@
               </button>
               <div class="upload-preview hidden" id="userUploadPreview">
                 <div class="mini-video-frame">
-                  <video muted playsinline preload="metadata"></video><div class="demo-pose hidden" data-demo-pose></div>
-                  <span class="upload-success-note">✓ 上传成功</span>
+                  <video muted playsinline preload="metadata"></video>
+                  <span class="upload-success-note">正在准备</span>
                 </div>
                 <div class="upload-file-copy"><strong></strong><small></small></div>
+                <progress class="upload-progress hidden" id="userUploadProgress" max="100" value="0" aria-label="我的练习视频上传进度"></progress>
+                <button class="upload-retry hidden" type="button" data-retry-upload="user">重新上传</button>
                 <button class="icon-button danger" type="button" data-remove-video="user" aria-label="删除我的练习视频">×</button>
               </div>
               <p class="field-message" id="userFieldMessage" role="status"></p>
@@ -86,8 +90,6 @@
             <span>MP4 / MOV</span><span>单个最长 3 分钟</span><span>单个最大 500MB</span><span>横竖屏都支持</span>
           </div>
 
-          <p class="mobile-compat-note"><strong>手机兼容说明：</strong>当前试用版由浏览器直接读取视频；若提示无法解析，请改用 H.264 视频编码、AAC 音频的 MP4。正式版将通过服务端转码统一兼容。</p>
-
           <aside class="soft-callout">
             <span class="callout-icon">i</span>
             <p><strong>不用提前剪视频。</strong>我们会以老师视频的音乐为基准自动对齐；如果没有对齐成功，再请你手动选一次动作起点。</p>
@@ -95,7 +97,6 @@
 
           <div class="page-actions stacked-actions">
             <button class="button primary" id="startProcessing" type="button" disabled>请先添加两段视频</button>
-            <button class="button text" id="loadDemoAssets" type="button">没有合适视频？使用演示素材</button>
           </div>
         </section>
 
@@ -174,8 +175,18 @@
             <h1 id="analysisTitle">正在找出最明显的动作差异</h1>
             <p>我们只会输出有足够依据的问题，不会为了凑数量给你打分。</p>
           </div>
-          <ol class="process-stepper analysis-stepper" id="analysisStepper" aria-live="polite"></ol>
-          <div class="analysis-fallback hidden" id="analysisFallback"><span>i</span><p>AI 教练暂时没有连接成功，完成动作差异分析后会先展示结构化兜底结果。</p></div>
+            <details class="analysis-process-panel" id="analysisProcessPanel" open>
+              <summary>本次分析过程</summary>
+              <ol class="process-stepper analysis-stepper" id="analysisStepper" aria-live="polite"></ol>
+              <section class="analysis-live-output" aria-live="polite" aria-label="分析过程输出">
+                <span class="eyebrow">LIVE PROCESS</span>
+                <p id="analysisLiveMessage">正在准备分析任务…</p>
+                <div class="analysis-activity" aria-hidden="true"><span></span></div>
+                <progress class="analysis-real-progress hidden" id="analysisRealProgress" max="100" value="0"></progress>
+                <p class="analysis-frame-stats hidden" id="analysisFrameStats"></p>
+              </section>
+              <div class="analysis-fallback hidden" id="analysisFallback"><span>i</span><p>AI 教练暂时没有连接成功，完成动作差异分析后会先展示结构化兜底结果。</p></div>
+            </details>
           <div class="page-actions stacked-actions"><button class="button secondary" id="cancelAnalysis" type="button">取消本次分析</button><button class="button text" type="button" data-replace-during-task="user">换一个我的视频</button></div>
         </section>
 
@@ -200,7 +211,7 @@
         </section>
 
         <section class="page-view" data-stage="blocking-error" aria-labelledby="errorTitle">
-          <div class="blocking-state"><div class="error-symbol">!</div><span class="eyebrow coral">NEEDS ATTENTION</span><h1 id="errorTitle">这次没有处理成功</h1><p id="blockingErrorMessage">视频处理服务暂时不可用，请稍后重试。</p><div class="page-actions stacked-actions"><button class="button primary" id="retryFromError" type="button">重新尝试</button><button class="button secondary" type="button" data-return-upload>返回更换视频</button></div><small>如果连续失败，请确认浏览器和网络正常，或换一段更短的视频。</small></div>
+          <div class="blocking-state"><div class="error-symbol">!</div><span class="eyebrow coral">NEEDS ATTENTION</span><h1 id="errorTitle">这次没有处理成功</h1><p id="blockingErrorMessage">视频处理服务暂时不可用，请稍后重试。</p><details class="analysis-trace hidden" id="analysisErrorTrace"><summary>查看失败前的处理过程</summary><div class="analysis-trace-content" id="analysisErrorTraceContent"></div></details><div class="page-actions stacked-actions"><button class="button primary" id="retryFromError" type="button">重新尝试</button><button class="button secondary" type="button" data-return-upload>返回更换视频</button></div><small>如果连续失败，请确认浏览器和网络正常，或换一段更短的视频。</small></div>
         </section>
       </main>
 
@@ -210,13 +221,13 @@
     <section class="comparison-workspace hidden" id="comparisonWorkspace" aria-label="双视频同步比对工作台">
       <div class="workspace-head"><div><span class="eyebrow">FRAME COMPARE</span><h2>老师和我的动作</h2></div><span class="status-badge success" id="workspaceAlignmentBadge">同步完成</span></div>
       <div class="dual-video-stage">
-        <article class="video-viewport teacher"><div class="viewport-label"><span class="role-label teacher">老师</span><span>目标人物已锁定</span></div><div class="viewport-media"><video id="teacherCompareVideo" muted playsinline preload="metadata"></video><div class="demo-pose hidden" data-demo-workspace="teacher"></div><div class="subject-lock-box" aria-hidden="true"></div></div></article>
-        <article class="video-viewport user"><div class="viewport-label"><span class="role-label user">我的练习</span><span>目标人物已锁定</span></div><div class="viewport-media"><video id="userCompareVideo" muted playsinline preload="metadata"></video><div class="demo-pose hidden" data-demo-workspace="user"></div><div class="subject-lock-box" aria-hidden="true"></div></div></article>
+        <article class="video-viewport teacher"><div class="viewport-label"><span class="role-label teacher">老师</span><span>目标人物已锁定</span></div><div class="viewport-media"><video id="teacherCompareVideo" playsinline preload="metadata"></video><canvas class="pose-overlay" id="teacherPoseCanvas" aria-hidden="true"></canvas><div class="subject-lock-box" aria-hidden="true"></div></div></article>
+        <article class="video-viewport user"><div class="viewport-label"><span class="role-label user">我的练习</span><span>目标人物已锁定</span></div><div class="viewport-media"><video id="userCompareVideo" muted playsinline preload="metadata"></video><canvas class="pose-overlay" id="userPoseCanvas" aria-hidden="true"></canvas><div class="subject-lock-box" aria-hidden="true"></div></div></article>
       </div>
       <div class="playback-panel">
         <div class="shared-timeline"><input id="sharedProgress" type="range" min="0" max="32" step="0.01" value="0" aria-label="共享视频进度" /><div class="timeline-overlay" id="timelineOverlay"></div></div>
         <div class="timeline-meta"><output id="sharedTime">00:00 / 00:32</output><span id="activeNodeLabel">尚未生成差异节点</span></div>
-        <div class="playback-controls"><button class="control-button" type="button" id="stepBack" aria-label="后退约一帧">−0.03</button><button class="control-button play" type="button" id="sharedPlay" aria-label="播放双视频">▶</button><button class="control-button" type="button" id="stepForward" aria-label="前进约一帧">+0.03</button><label class="speed-select"><span>速度</span><select id="playbackRate"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option></select></label></div>
+        <div class="playback-controls"><button class="control-button" type="button" id="stepBack" aria-label="后退 0.03 秒">−0.03s</button><button class="control-button play" type="button" id="sharedPlay" aria-label="播放双视频">▶</button><button class="control-button" type="button" id="stepForward" aria-label="前进 0.03 秒">+0.03s</button><button class="control-button speed-button" type="button" id="playbackRate" aria-label="切换播放速度">速度 1×</button></div>
       </div>
     </section>
 
@@ -228,7 +239,6 @@
         </div>
         <div class="crop-stage" id="cropStage">
           <video id="cropVideo" muted playsinline preload="metadata"></video>
-          <div class="crop-demo hidden" id="cropDemo" aria-hidden="true"></div>
           <div class="crop-selection" id="cropSelection" aria-hidden="true"><span>分析这个人</span></div>
         </div>
         <p class="crop-hint" id="cropHint">在人物全身外侧拖动一个框。框选区域会换算到视频原始尺寸，不受手机屏幕缩放影响。</p>
@@ -243,7 +253,7 @@
     <div class="drawer-backdrop hidden" id="privacyBackdrop">
       <aside class="bottom-drawer" role="dialog" aria-modal="true" aria-labelledby="privacyTitle">
         <div class="drawer-handle"></div><div class="drawer-head"><div><span class="eyebrow">PRIVACY</span><h2 id="privacyTitle">隐私与本次数据</h2></div><button class="icon-button" id="privacyClose" type="button" aria-label="关闭隐私说明">×</button></div>
-        <div class="privacy-points"><div><span>01</span><p><strong>无需注册账号</strong><small>本次 Demo 不建立用户档案或历史记录。</small></p></div><div><span>02</span><p><strong>大模型不直接读取视频</strong><small>先生成结构化动作差异，再整理成易懂反馈。</small></p></div><div><span>03</span><p><strong>你可以随时删除</strong><small>删除后会清空当前会话、视频引用和报告。</small></p></div></div>
+        <div class="privacy-points"><div><span>01</span><p><strong>无需注册账号</strong><small>本次任务不建立用户档案或历史记录。</small></p></div><div><span>02</span><p><strong>大模型不直接读取视频</strong><small>先在本地生成结构化动作差异，再由服务端整理成易懂反馈。</small></p></div><div><span>03</span><p><strong>24 小时内自动清理</strong><small>你也可以随时删除本次原视频、处理文件、任务和报告。</small></p></div></div>
         <div class="drawer-actions"><button class="button danger" id="deleteSession" type="button">删除本次数据</button><button class="button secondary" id="privacyDone" type="button">我知道了</button></div>
       </aside>
     </div>
@@ -253,10 +263,6 @@
     </div>
 
     <div class="toast-region" aria-live="polite" aria-atomic="true"><div class="toast hidden" id="toast"><span>✓</span><p></p></div></div>
-
-    <aside class="review-toolbar hidden" id="reviewToolbar" aria-label="Demo 状态切换工具">
-      <strong>Demo 场景</strong><select id="scenarioSelect"><option value="standard">标准多人流程</option><option value="alignment-failed">自动对齐失败</option><option value="model-fallback">模型兜底</option><option value="tracking-lost">追踪丢失</option><option value="blocking-error">阻断错误</option></select><button type="button" id="reviewReset">重置</button>
-    </aside>
 
     <script type="module" src="./app.js?v=20260717-upload-preview"></script>
   </body>

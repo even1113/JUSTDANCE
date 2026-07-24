@@ -18,18 +18,24 @@ function createInitialAppState() {
   return {
     stage: 'upload',
     sessionId: null,
+    sessionToken: null,
+    analysisTaskId: null,
+    poseAnalysis: null,
+    poseFrames: null,
     taskVersion: 0,
-    scenario: 'standard',
     videos: { teacher: null, user: null },
     processingSteps: [],
+    analysisTrace: [],
     subjectSelections: { teacher: null, user: null },
     subjectStep: 'teacher',
     alignment: null,
     manualAnchors: { teacher: null, user: null },
     report: null,
     activeMismatchIndex: -1,
+    expandedMismatchIds: [],
     commonTime: 0,
     error: null,
+    errorContext: null,
     isPlaying: false,
   }
 }
@@ -69,8 +75,14 @@ function canStartProcessing(state) {
     state.videos.teacher
     && state.videos.user
     && !state.videos.teacher.playbackError
-    && !state.videos.user.playbackError,
+    && !state.videos.user.playbackError
+    && isVideoReady(state.videos.teacher)
+    && isVideoReady(state.videos.user),
   )
+}
+
+function isVideoReady(video) {
+  return !video.processingStatus || video.processingStatus === 'ready'
 }
 
 function canStartAnalysis(state) {
@@ -88,6 +100,14 @@ function getActiveMismatchIndex(mismatches, commonTime) {
   ))
 }
 
+function toggleExpandedMismatchId(expandedIds, mismatchId) {
+  if (!mismatchId) return Array.isArray(expandedIds) ? [...expandedIds] : []
+  const next = new Set(Array.isArray(expandedIds) ? expandedIds : [])
+  if (next.has(mismatchId)) next.delete(mismatchId)
+  else next.add(mismatchId)
+  return [...next]
+}
+
 function nextTaskVersion(state) {
   state.taskVersion += 1
   return state.taskVersion
@@ -103,6 +123,7 @@ export {
   createInitialAppState,
   getActiveMismatchIndex,
   nextTaskVersion,
+  toggleExpandedMismatchId,
   validateVideoDuration,
   validateVideoFile,
 }

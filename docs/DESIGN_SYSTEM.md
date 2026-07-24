@@ -67,7 +67,7 @@ DanceMirror 面向长期练舞的 C 端用户，界面应当像一位克制、�
 
 - 变体：teacher / user；empty / selected / error / disabled
 - 已选择态展示视频预览、真实文件名、时长、大小、删除入口
-- 两段视频都存在后才启用“自动准备两段视频”
+- 两段视频都存在并完成处理后才启用“立即体验AI分析舞蹈动作”
 
 ### Comparison Workspace
 

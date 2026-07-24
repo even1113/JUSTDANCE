@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { createSubjectTracker } from '../../services/subjectTracker.js'
+import { createSubjectTracker, normalizeCropRect } from '../../services/subjectTracker.js'
 
 function makePose(centerX, style = 'wide') {
   return Array.from({ length: 33 }, (_, index) => {
@@ -25,6 +25,15 @@ function result(...poses) {
 }
 
 describe('subject tracker', () => {
+  test('does not divide an already normalized manual crop a second time', () => {
+    expect(normalizeCropRect({ x: 0.2, y: 0.1, width: 0.4, height: 0.8 }, 1920, 1080)).toEqual({
+      x: 0.2,
+      y: 0.1,
+      width: 0.4,
+      height: 0.8,
+    })
+  })
+
   test('uses the crop on the first frame and keeps the same target while people cross', () => {
     const tracker = createSubjectTracker({
       cropRect: {

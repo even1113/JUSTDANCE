@@ -4,6 +4,7 @@ import {
   canStartProcessing,
   createInitialAppState,
   getActiveMismatchIndex,
+  toggleExpandedMismatchId,
   validateVideoDuration,
   validateVideoFile,
 } from '../../services/appState.js'
@@ -46,5 +47,15 @@ describe('app state and upload validation', () => {
     expect(getActiveMismatchIndex(issues, 9)).toBe(0)
     expect(getActiveMismatchIndex(issues, 17)).toBe(-1)
     expect(getActiveMismatchIndex(issues, 20)).toBe(1)
+  })
+
+  test('toggles mismatch expansion independently', () => {
+    const firstOpen = toggleExpandedMismatchId([], 'issue-1')
+    const firstAndSecondOpen = toggleExpandedMismatchId(firstOpen, 'issue-2')
+    const onlySecondOpen = toggleExpandedMismatchId(firstAndSecondOpen, 'issue-1')
+
+    expect(firstOpen).toEqual(['issue-1'])
+    expect(firstAndSecondOpen).toEqual(['issue-1', 'issue-2'])
+    expect(onlySecondOpen).toEqual(['issue-2'])
   })
 })

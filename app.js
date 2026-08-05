@@ -1241,7 +1241,8 @@ function renderReport() {
 }
 
 function renderIssueList() {
-  elements.reportIssueList.innerHTML = state.report.mismatches
+  const mismatches = state.report?.mismatches || []
+  elements.reportIssueList.innerHTML = mismatches
     .map((issue, index) => renderIssueCard(issue, index, {
       active: index === state.activeMismatchIndex,
       expanded: state.expandedMismatchIds.includes(issue.id),

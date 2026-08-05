@@ -319,6 +319,12 @@ async function loadVideoFile(role, file) {
   }
 }
 
+function bothVideosReady() {
+  const teacher = state.videos.teacher
+  const user = state.videos.user
+  return Boolean(teacher && user && teacher.processingStatus === 'ready' && user.processingStatus === 'ready')
+}
+
 async function uploadSelectedVideo(role, asset) {
   uploadControllers.get(role)?.abort()
   const controller = new AbortController()
@@ -360,7 +366,9 @@ async function uploadSelectedVideo(role, asset) {
     asset.height = Number(video.metadata?.height) || asset.height
     asset.message = ''
     renderUploadState()
-    showToast(`${role === 'teacher' ? '老师' : '我的'}视频已上传并完成格式处理`)
+    if (bothVideosReady()) {
+      showToast('两段视频均已上传并完成格式处理，可以开始分析')
+    }
   } catch (error) {
     if (error.name === 'AbortError' || state.videos[role] !== asset) return
     console.warn(`[DanceMirror] ${role} 视频服务端上传失败，使用本地视频继续。`, error)
@@ -369,7 +377,9 @@ async function uploadSelectedVideo(role, asset) {
     asset.playbackUrl = asset.url
     asset.message = ''
     renderUploadState()
-    showToast(`已选择${role === 'teacher' ? '老师' : '我的'}视频（本地模式）`, 'success')
+    if (bothVideosReady()) {
+      showToast('两段视频均已就绪（本地模式），可以开始分析', 'success')
+    }
   } finally {
     if (uploadControllers.get(role) === controller) uploadControllers.delete(role)
   }

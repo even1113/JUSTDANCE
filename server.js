@@ -8,7 +8,7 @@ import { loadConfig } from './server/config.js'
 import { createApiRuntime } from './server/runtime.js'
 
 const defaultRootDir = fileURLToPath(new URL('.', import.meta.url))
-const publicRootFiles = new Set(['app.js', 'index.html', 'styles.css'])
+const publicRootFiles = new Set(['app.js', 'index.html', 'styles.css', 'favicon.ico'])
 const publicDirectories = new Set(['components', 'hooks', 'services', 'vendor'])
 
 const mimeTypes = {

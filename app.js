@@ -20,6 +20,7 @@ import {
   upsertAnalysisTrace,
 } from './services/analysisTrace.js'
 import { buildStructuredAnalysisForModel } from './services/feedbackGenerator.js'
+import { createRuleReport } from './services/ruleReport.js'
 import { assertValidStructuredAnalysis } from './services/structuredAnalysisSchema.js'
 import { renderCandidateCard, renderIssueCard } from './components/uiComponents.js'
 
@@ -362,10 +363,13 @@ async function uploadSelectedVideo(role, asset) {
     showToast(`${role === 'teacher' ? '老师' : '我的'}视频已上传并完成格式处理`)
   } catch (error) {
     if (error.name === 'AbortError' || state.videos[role] !== asset) return
-    asset.processingStatus = 'error'
-    asset.message = error.message || '视频上传或处理失败，请重新选择。'
+    console.warn(`[DanceMirror] ${role} 视频服务端上传失败，使用本地视频继续。`, error)
+    asset.processingStatus = 'ready'
+    asset.uploadProgress = 100
+    asset.playbackUrl = asset.url
+    asset.message = ''
     renderUploadState()
-    showToast(asset.message, 'error')
+    showToast(`已选择${role === 'teacher' ? '老师' : '我的'}视频（本地模式）`, 'success')
   } finally {
     if (uploadControllers.get(role) === controller) uploadControllers.delete(role)
   }
@@ -416,19 +420,28 @@ async function startProcessing() {
   activeController = new AbortController()
 
   try {
-    await ensureComparisonSession()
+    let sessionReady = true
+    try {
+      await ensureComparisonSession()
+    } catch (sessionError) {
+      if (sessionError.name === 'AbortError') throw sessionError
+      console.warn('[DanceMirror] 服务端会话创建失败，使用本地离线模式继续。', sessionError)
+      sessionReady = false
+    }
+
+    const completed = sessionReady ? ['upload', 'transcode'] : ['upload']
     state.processingSteps = {
       active: 'alignment',
-      completed: ['upload', 'transcode'],
+      completed,
       steps: PROCESSING_STEPS,
     }
     renderStepper(elements.processingStepper, state.processingSteps)
     elements.processingMessage.textContent = '正在以老师视频音轨为基准寻找共同动作区间'
     const alignment = await resolveAlignment({ status: 'ready', offsetSec: 0 })
-    const completed = alignment.status === 'manual-required'
-      ? ['upload', 'transcode']
-      : ['upload', 'transcode', 'alignment']
-    state.processingSteps = { active: 'subject', completed, steps: PROCESSING_STEPS }
+    const alignmentCompleted = alignment.status === 'manual-required'
+      ? completed
+      : [...completed, 'alignment']
+    state.processingSteps = { active: 'subject', completed: alignmentCompleted, steps: PROCESSING_STEPS }
     renderStepper(elements.processingStepper, state.processingSteps)
     elements.processingMessage.textContent = '请选择自动锁定主要人物，复杂画面可手动框选'
     await finishVideoPreparation({ alignment, needsSubjectSelection: true })
@@ -1047,22 +1060,30 @@ async function runAnalysis(signal) {
     steps: ANALYSIS_STEPS,
   })
 
-  return comparisonApi.startAnalysis({
-    sessionId: state.sessionId,
-    token: state.sessionToken,
-    inputVersion: state.taskVersion,
-    sharedDurationSec: getComparisonDuration(),
-    structuredAnalysis,
-    signal,
-    onTaskCreated(analysis) {
-      state.analysisTaskId = analysis.id
-    },
-    onStatus(analysis) {
-      const traceUpdate = mapApiTraceUpdate(analysis)
-      renderAnalysisProgress(mapApiAnalysisProgress(analysis), traceUpdate)
-      elements.analysisFallback.classList.toggle('hidden', analysis.status !== 'fallback')
-    },
-  })
+  try {
+    const apiReport = await comparisonApi.startAnalysis({
+      sessionId: state.sessionId,
+      token: state.sessionToken,
+      inputVersion: state.taskVersion,
+      sharedDurationSec: getComparisonDuration(),
+      structuredAnalysis,
+      signal,
+      onTaskCreated(analysis) {
+        state.analysisTaskId = analysis.id
+      },
+      onStatus(analysis) {
+        const traceUpdate = mapApiTraceUpdate(analysis)
+        renderAnalysisProgress(mapApiAnalysisProgress(analysis), traceUpdate)
+        elements.analysisFallback.classList.toggle('hidden', analysis.status !== 'fallback')
+      },
+    })
+    return apiReport
+  } catch (apiError) {
+    if (apiError.name === 'AbortError') throw apiError
+    console.warn('[DanceMirror] 服务端 AI 分析不可用，使用本地规则引擎生成复盘报告。', apiError)
+    const fallbackReport = createRuleReport(structuredAnalysis)
+    return { ...fallbackReport, fallback: true }
+  }
 }
 
 function analysisCropFor(role) {

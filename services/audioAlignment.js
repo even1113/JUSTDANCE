@@ -33,7 +33,10 @@ async function alignAudioTracks(teacherFile, userFile, options = {}) {
     })
 
     if (result.correlation < MIN_CORRELATION) {
-      throw new Error('两段音轨的相似度不足，无法可靠自动对齐，请使用手动偏移标定')
+      const error = new Error('两段音轨的相似度不足，无法可靠自动对齐，请使用手动偏移标定')
+      error.code = 'audio_mismatch'
+      error.correlation = result.correlation
+      throw error
     }
 
     const timeline = estimateAudioTimeline(teacherEnvelope, userEnvelope, {
